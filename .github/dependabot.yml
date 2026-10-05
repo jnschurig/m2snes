@@ -1,0 +1,10 @@
+# Keeps the SHA pins of the workflows' actions current. Its PRs touch only
+# .github/ (ci.yml's dependabot-scope job fails one that does not), so they may
+# be merged in the web UI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
