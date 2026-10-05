@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------
+# Nothing derived from the user's ROM is ever tracked.
+#
+# This mirrors M2RoS's model and is the mechanical half of the legal posture in
+# `01-requirements.md`: the repository contains our original work plus diffs
+# against conversion output, never proprietary bytes. `zig build verify` runs a
+# policy check over tracked files as a second line of defence — see
+# `src/policy.zig` — but this file is the first.
+# ---------------------------------------------------------------------------
+
+# The user's ROM. Never tracked, under any name.
+*.gb
+*.gbc
+*.sfc
+*.smc
+
+# Saves, from any emulator or the FXPak.
+*.srm
+
+# Symbol files from cart builds. The engine image's own symbols are tracked.
+*.sym
+!/engine/engine.sym
+
+# Everything extracted from, or rendered from, the ROM.
+/extracted/
+/reference/
+/build-out/
+
+# Third-party disassemblies and test ROMs, fetched by tools/ scripts.
+/vendor/
+
+# Zig
+.zig-cache/
+zig-out/
+
+# Editor / OS
+.DS_Store

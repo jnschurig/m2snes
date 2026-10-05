@@ -1,0 +1,44 @@
+# metroid2-audio Step 16a: the cart's lag cases, with requests in them.
+#
+# A frame with no `handleAudio` call and a frame with two both happen in play
+# (a door's trigger frame makes two calls; the death's blank frames make none),
+# and the cart never merges two ticks' records. So each request below sits in a
+# specific tick of a frame that is not one tick long, and the grade holds only
+# if the engine sees it on that tick. Run it with `--ack-delay` too: then ticks
+# queue behind a message in flight and go out several to a message, and the
+# engine must still see the same records in the same order.
+[songRequest=04]
+[] []
+[sfxRequest_square1=0F]
+-
+[] [sfxRequest_noise=02]
+-
+-
+[sfxRequest_square1=15] [] [sfxRequest_noise=01]
+[]
+[] [songInterruptionRequest=01]
+[]
+[]
+-
+[] [] [] []
+[sfxRequest_square1=0C] [sfxRequest_square1=0E]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]
+[]

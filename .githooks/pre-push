@@ -1,0 +1,60 @@
+#!/bin/sh
+# pre-push (release Step 9): every blob new to the remote through the history
+# audit (the file policy with the ROM n-gram scan), then the unit tests and the
+# cart pins on the tree being pushed, and `pin-check` when a `v*` tag goes. Any red blocks the push.
+# Enabled per clone with `mise run hooks`. See README -> Developing.
+#
+# It needs the ROM: with M2_ROM unset the ROM rungs would print `not run:`
+# and pass, which is a green that checked nothing, so the push is refused.
+set -eu
+
+remote="$1"
+zero=0000000000000000000000000000000000000000
+
+if [ -z "${M2_ROM:-}" ] || [ ! -f "$M2_ROM" ]; then
+    echo "pre-push: refused: M2_ROM is unset or not a file, so the ROM checks cannot run." >&2
+    echo "pre-push: push from a shell where mise is active (or 'mise exec -- git push')." >&2
+    exit 1
+fi
+
+head=$(git rev-parse HEAD)
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "pre-push: refused: the working tree has uncommitted changes, and the gate grades the tree." >&2
+    exit 1
+fi
+
+ran=""
+tag=no
+pushed=no
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue    # a deletion sends no objects
+    pushed=yes
+    # The gate runs on the working tree, so it only speaks for HEAD.
+    if [ "$(git rev-parse "$local_sha^{commit}")" != "$head" ]; then
+        echo "pre-push: refused: $local_ref is not HEAD; check it out and push again so the gate grades it." >&2
+        exit 1
+    fi
+    case "$remote_ref" in refs/tags/v*) tag=yes ;; esac
+    # Everything the remote's branches do not already hold. With no
+    # remote-tracking refs (a first push) that is the whole history.
+    echo "pre-push: history audit of $local_ref -> $remote_ref"
+    zig build history-audit -- . --revs "$local_sha" --not "--remotes=$remote" </dev/null
+    ran="$ran history-audit($remote_ref)"
+done
+
+[ "$pushed" = no ] && exit 0
+
+# `zig build verify` takes about 13.5 minutes warm (release Step 9), too long
+# for every push, so the hook runs the unit tests with the ROM and the carts
+# against their pins; `verify` stays manual.
+echo "pre-push: the gate (zig build test-rom cart-pin)"
+zig build test-rom cart-pin
+ran="$ran test-rom cart-pin"
+
+if [ "$tag" = yes ]; then
+    echo "pre-push: a v* tag: zig build pin-check"
+    zig build pin-check
+    ran="$ran pin-check"
+fi
+
+echo "pre-push: ok:$ran"

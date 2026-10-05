@@ -1,0 +1,125 @@
+Third-party notices for m2snes
+==============================
+
+m2snes is MIT licensed (see LICENSE). This file lists what the m2snes binary
+carries from others, and, separately, what the repository uses at development
+time without shipping.
+
+Nothing in this repository or in the m2snes binary is Nintendo's. The builder
+reads every game asset out of a ROM the player dumps from their own cartridge.
+
+*Metroid*, *Metroid II: Return of Samus*, Nintendo, Game Boy and Super Nintendo
+Entertainment System are trademarks of Nintendo. This project is not affiliated
+with, endorsed by, or sponsored by Nintendo. It contains no Nintendo code,
+graphics, sound or other copyrighted material; the builder works only from a ROM
+you dump from your own cartridge. All other trademarks and copyrights belong to
+their respective owners.
+
+
+1. In the m2snes binary
+-----------------------
+
+1.1 M2RoS
+    https://github.com/metroidret/M2RoS
+
+    A labelled disassembly of Metroid II, used as the behavioural spec. No file
+    of it is vendored or shipped. The m2snes engine images, which the binary
+    embeds, follow it closely: engine/main.asm and engine/audio/main.asm port
+    the game's routines using M2RoS's routine and variable names and its
+    structure, and cite it by file and line (engine/audio/main.asm about 150
+    times, engine/main.asm about 30). The embedded symbol file
+    engine/engine.sym carries many of those names. src/offsets.zig, also
+    compiled in, names ROM locations after M2RoS (131 citations), though each
+    offset is verified against the ROM itself. Its notice is reproduced
+    because of that derivation.
+
+    MIT License
+
+    Copyright (c) 2022 alex-west
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+1.2 The Zig standard library
+    https://ziglang.org
+
+    m2snes is written in Zig 0.16.0. The standard library and compiler-rt are
+    compiled into every binary. The binary links no C library, except that the
+    macOS one links the system's libSystem dynamically.
+
+    The MIT License (Expat)
+
+    Copyright (c) Zig contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+
+1.3 The GB APU shim (audio/shim/)
+
+    The SPC700 program that models the Game Boy's sound hardware, and its
+    encoders (shim.bin, shim_abi.inc, shimpkg.zig, wave.zig, noise.zig). It is
+    James Schurig's own code, generated in his snes_game_dev repository at the
+    commit audio/shim/MANIFEST names (3924c36a1a59396b51089c59c61fee77df89983f)
+    and copied here. That repository has no licence file. Its author licenses
+    this copy under this repository's MIT licence (LICENSE).
+
+    Its sources were read for third-party code before release. None was found.
+    The shim's register definitions (audio/gbapu/registers.inc there) were
+    written out from hardware documentation, deliberately not taken from the
+    Terrific Audio Driver's zlib-licensed equivalent. The shim follows that
+    driver's coding style only. Its output level is set to match SameBoy's
+    rendering of the Game Boy, but no SameBoy code is in it.
+
+
+2. Used at development time only (not in the binary)
+----------------------------------------------------
+
+None of these is committed to this repository. Each is fetched by a script in
+tools/ into the ignored vendor/ or reference/ directories, under its own licence.
+
+- SameBoy (Expat/MIT, Copyright (c) 2015-2025 Lior Halphon),
+  https://github.com/LIJI32/SameBoy. Reference frames for grading the PPU, and
+  the reference player behind `zig build audioab` (src/sbref.c links its APU).
+- M2RoS (MIT, above), fetched by tools/get-bank4-sym.sh to name bank 4's
+  routines in `zig build audiocost`.
+- Vashy777/metroid2 (MIT), https://github.com/Vashy777/metroid2. An mgbdis dump,
+  used for the routine inventory behind `zig build ledger`.
+- asar (LGPL-3.0-or-later), https://github.com/RPGHacker/asar. Assembles
+  engine/main.asm into the committed engine/engine.bin. Its author claims no
+  copyright over its output.
+- spc700asm, from the Terrific Audio Driver (compiler: MIT; Copyright (c) 2023
+  Marcus Rowe), https://github.com/undisbeliever/terrific-audio-driver.
+  Assembles engine/audio/main.asm into the committed engine/audio.bin.
+- Blargg's Game Boy test ROMs, via https://github.com/retrio/gb-test-roms, for
+  the emulator's CPU tests.
+- Tool-assisted movies from https://tasvideos.org, replayed by `zig build tas`.

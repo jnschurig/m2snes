@@ -1,0 +1,7 @@
+# The SHA-1s every build of the cart is graded against (src/pin.zig).
+# Hashes only. Never edit by hand: an intended output change re-pins with
+#   zig build repin -- "<why>"
+# which logs the old and new hashes and the reason in pins/history.md.
+retail 3452e39133b42a96f6dcdaf09dc51aff6f4d097e
+debug e215c9a561cc5a2450010f35c0614ccf34d78948
+crawl d4398e1b546fdda68e3146aab24910c09143d3ef

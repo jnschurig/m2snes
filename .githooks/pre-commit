@@ -1,0 +1,7 @@
+#!/bin/sh
+# pre-commit (release Step 9): the file policy over the blobs this commit
+# stages -- size ceiling, forbidden paths, and the ROM n-gram scan when M2_ROM
+# is set -- so ROM bytes are refused before they enter local history.
+# Enabled per clone with `mise run hooks`. See README -> Developing.
+set -eu
+exec zig build policy -- --staged

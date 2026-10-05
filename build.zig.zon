@@ -1,0 +1,7 @@
+.{
+    .name = .m2snes,
+    .version = "0.1.0",
+    .dependencies = .{},
+    .paths = .{""},
+    .fingerprint = 0x340c00fd53626db1,
+}

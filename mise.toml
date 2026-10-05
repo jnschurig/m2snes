@@ -1,0 +1,28 @@
+[tools]
+# Pinned exactly (not "latest"). Upgrades are deliberate: bump here, run
+# `zig build verify`, then commit.
+zig = "0.16.0"
+
+[env]
+# The user's Metroid II ROM. Every gate that touches real data needs it, and
+# nothing in this repository ships it — see docs/setup.md. Left empty when the
+# file is absent: `zig build test` then skips the ROM tests, and `test-rom`,
+# `verify` and `verify-full` fail.
+# First candidate wins; an already-exported M2_ROM always takes precedence.
+#
+# The trailing `:` matters: mise runs exec() under `sh -o errexit`, and a
+# nonzero exit fails the whole config parse (taking the zig pin down with it).
+M2_ROM = "{{ exec(command='for p in \"$M2_ROM\" \"$PWD/metroid2.gb\" \"$HOME/roms/gb/metroid2.gb\" \"$HOME/games/roms/gb/Metroid II - Return of Samus (W).gb\"; do [ -n \"$p\" ] && [ -f \"$p\" ] && echo \"$p\" && break; done; :') }}"
+
+# Mesen2, for the SNES-side boot tests that arrive in Step 12. Resolved here so
+# no path is hardcoded in build.zig. Empty means absent: the emulator rungs
+# print `not run:`.
+MESEN = "{{ exec(command='for p in \"$MESEN\" \"$HOME/Games/mesen/Mesen\" /Applications/Mesen.app/Contents/MacOS/Mesen \"$(command -v Mesen || true)\"; do [ -n \"$p\" ] && [ -x \"$p\" ] && echo \"$p\" && break; done; :') }}"
+
+[tasks.verify]
+description = "The gate: unit tests, tracked-file policy, and the ROM-dependent checks (needs the ROM)"
+run = "zig build verify"
+
+[tasks.hooks]
+description = "Use the tracked git hooks in .githooks/ (once per clone): the policy before each commit, the audit and the gate before each push"
+run = "git config core.hooksPath .githooks"

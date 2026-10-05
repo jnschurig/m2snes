@@ -1,0 +1,12 @@
+# The cases a per-frame protocol cannot express: a frame with no
+# `handleAudio` call at all, and a frame with two. `handleAudio` runs from
+# `waitOneFrame` and from the game's wait loops, so both happen in play.
+[songRequest=04]
+[]
+-
+[] []
+[]
+-
+-
+[] [] []
+[]
