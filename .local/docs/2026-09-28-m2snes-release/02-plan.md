@@ -606,7 +606,7 @@ Code facts the design rests on (read 2026-10-04):
       empty-commit push himself. It was refused with `GH013: Repository rule violations …
       Changes must be made through a pull request`, and `main` is still `fcced54`.
 
-- [ ] **Step 12: Migrate skills, docs and memories** (Feature 8; on `dev`, through the hooks)
+- [x] **Step 12: Migrate skills, docs and memories** (Feature 8; on `dev`, through the hooks)
   - [x] `fxpak`: copy the skill and `tools/fxpak.sh`. Default the cart to
     `build-out/m2snes.sfc`, and take SNI's binary from `PATH` or `SNI` instead of
     `~/go/bin/sni`. Run its status/deploy commands once against the console (or, with the
@@ -631,7 +631,7 @@ Code facts the design rests on (read 2026-10-04):
     - drop GitLab-only content;
     - check every file, flag and command they name still exists.
     Prune snes_game_dev's memory of notes that only apply to m2snes.
-  - [ ] Verify: the push of `dev` passes the hooks. A fresh session in `~/git/m2snes-gh`
+  - [x] Verify: the push of `dev` passes the hooks. A fresh session in `~/git/m2snes-gh`
     lists the three skills. `rg -n 'snes_game_dev'` in the migrated skills finds no
     dependency on the old repo.
   - **Results 2026-10-05:**
@@ -665,6 +665,12 @@ Code facts the design rests on (read 2026-10-04):
     - A fresh `claude -p` in `~/git/m2snes-gh` lists `fxpak`, `rom-test` and `verify-gate`
       (and not snes_game_dev's `plan-site`). `rg 'snes_game_dev|go/bin'` over the skills
       and the script finds nothing.
+    - Pushed `ebcf11e` to `dev` through the hooks (228 s): the audit found 33 new blobs and no
+      hits, then `test-rom` and `cart-pin` were green. `ls-remote` shows `dev` = `ebcf11e`.
+      Pre-commit ran without `M2_ROM` (n-grams `not run:`), but the staged scan before it
+      and the pre-push audit both ran them with the ROM. The pointers went in snes_game_dev as
+      `1ca22f4` on `metroid2`: a `MOVED.md` in each directory, and a first line in each single
+      file.
 
 - [ ] **Step 13: GitHub Actions CI** (Feature 4; on `dev`, PR to `main`)
   - [ ] `.github/workflows/ci.yml`, on `push` and `pull_request`, `permissions: contents:
