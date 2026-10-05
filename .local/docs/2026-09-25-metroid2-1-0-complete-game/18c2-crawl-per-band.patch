@@ -1,0 +1,350 @@
+diff --git a/src/crawl.zig b/src/crawl.zig
+index a188155..6dd139c 100644
+--- a/src/crawl.zig
++++ b/src/crawl.zig
+@@ -315,7 +315,15 @@ fn tryDoor(m: *harness.Machine, rom: []const u8, w: roster.World, e: Entry, ci:
+ /// crawled breadth first from the new game, in what the doors walked leave
+ /// loaded; when that runs dry, a room not yet reached is seeded with what the
+ /// static reading says it has, and the crawl goes on from there.
+-pub fn crawl(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, inf: warp.Inference) !Crawl {
++///
++/// **At one Metroid count, `count`, throughout (1.0 Step 18c2).** A door script
++/// reads the count only through `IF_MET_LESS`, so what a player sees at a
++/// count is what the new game walked at that count sees. Until 18c2 the crawl
++/// walked at the new game's and tried a door at a lower count only where the
++/// branch went elsewhere, then walked on from there at the new game's again:
++/// past door `$4A` at $46 the lava stood once more, and the rooms the first
++/// kill opens were reached only from seeds. `bands` lists the counts to crawl.
++pub fn crawl(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, inf: warp.Inference, count: u8) !Crawl {
+     var out: Crawl = .{};
+     errdefer out.deinit(allocator);
+     var seen: std.AutoHashMapUnmanaged(Key, usize) = .empty;
+@@ -350,27 +358,9 @@ pub fn crawl(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, inf
+             for (0..map.cells) |ci| {
+                 const c = w.banks[bi].cells[ci];
+                 if (!c.inUse() or w.room[bi][ci] != e.room) continue;
+-                const index = roster.doorIndex(c.transition);
+-                var tb: [8]u8 = undefined;
+-                const ths = inf.thresholdsOf(index, &tb);
+                 for ([_]roster.Dir{ .right, .left, .up, .down }) |d| {
+                     if (!d.blocks(c.scroll)) continue;
+-                    // At the new game's count, and at every count the door
+-                    // tests against: a door that branches may go elsewhere.
+-                    // Only where the branch sends the door somewhere else: what
+-                    // it loads at another count, the warp's chain works out at
+-                    // the live count on both machines.
+-                    var counts: [9]u8 = undefined;
+-                    counts[0] = warp.start_count;
+-                    var nc: usize = 1;
+-                    const to0 = inf.warpsTo(index, warp.start_count);
+-                    for (ths) |th| {
+-                        const to = inf.warpsTo(index, th);
+-                        if (std.meta.eql(to, to0)) continue;
+-                        counts[nc] = th;
+-                        nc += 1;
+-                    }
+-                    for (counts[0..nc]) |count| {
++                    {
+                         out.tried += 1;
+                         var g = try tryDoor(&m, rom, w, e, @intCast(ci), d, count, &out) orelse continue;
+                         const tg = g.loaded.tileset(rom) orelse continue;
+@@ -417,6 +407,8 @@ pub fn crawl(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, inf
+                 const p: roster.Place = .{ .bank = map.first_bank + @as(u8, @intCast(seed_bank)), .cell = @intCast(seed_cell) };
+                 const l = inf.loader(p) orelse continue;
+                 m.restore(base);
++                m.write(count_real_addr, count);
++                m.write(count_shown_addr, count);
+                 _ = room.spawn(&m, .{ .map_bank = p.bank, .screen_row = c.y, .screen_col = c.x, .door_index = l }) catch continue;
+                 const lo = Loaded.read(&m);
+                 const t = lo.tileset(rom) orelse continue;
+@@ -438,6 +430,28 @@ pub fn crawl(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, inf
+     return out;
+ }
+ 
++/// The counts to crawl at, one a band (1.0 Step 18c2): the new game's, then
++/// each `IF_MET_LESS` operand under it, highest first. A branch is taken at
++/// its operand and every count below it, so a band's operand is the count
++/// that takes every branch the band takes. Read off the scripts.
++pub fn bands(decoded: door.Decoded, out: *[256]u8) []u8 {
++    var seen: [256]bool = @splat(false);
++    for (decoded.ops.items) |op| switch (op) {
++        .if_met_less => |x| seen[x.met_count] = true,
++        else => {},
++    };
++    out[0] = warp.start_count;
++    var n: usize = 1;
++    var c: usize = warp.start_count;
++    while (c > 0) {
++        c -= 1;
++        if (!seen[c]) continue;
++        out[n] = @intCast(c);
++        n += 1;
++    }
++    return out[0..n];
++}
++
+ /// The crawl as the warp table reads it: every door walked, both ends.
+ pub fn walkedDoors(allocator: std.mem.Allocator, c: Crawl) ![]warp.WalkedDoor {
+     const out = try allocator.alloc(warp.WalkedDoor, c.edges.items.len);
+diff --git a/src/crawl_main.zig b/src/crawl_main.zig
+index c112dae..40a2e6b 100644
+--- a/src/crawl_main.zig
++++ b/src/crawl_main.zig
+@@ -27,14 +27,57 @@ pub fn main(init: std.process.Init) !void {
+     var inf = try warp.Inference.init(a, rom, w);
+     defer inf.deinit(a);
+     const t0 = std.Io.Clock.awake.now(init.io);
+-    var c = try crawl.crawl(a, rom, w, inf);
+-    defer c.deinit(a);
+-    const walked = try crawl.walkedDoors(a, c);
++    // One crawl a count band (1.0 Step 18c2), each from the new game, on a
++    // thread of its own: a band is about two minutes, and fourteen in a row
++    // is half an hour. Joined in band order, so the file is the same each run.
++    var bb: [256]u8 = undefined;
++    const counts = crawl.bands(inf.decoded, &bb);
++    const Band = struct {
++        count: u8,
++        walked: []warp.WalkedDoor = &.{},
++        entries: usize = 0,
++        seeded: usize = 0,
++        failed: ?anyerror = null,
++        fn run(self: *@This(), rom_: []const u8, w_: roster.World, inf_: warp.Inference) void {
++            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
++            const ba = arena.allocator();
++            var c = crawl.crawl(ba, rom_, w_, inf_, self.count) catch |e| {
++                self.failed = e;
++                return;
++            };
++            self.walked = crawl.walkedDoors(std.heap.page_allocator, c) catch |e| {
++                self.failed = e;
++                return;
++            };
++            self.entries = c.entries.items.len;
++            self.seeded = c.seeded;
++            c.deinit(ba);
++            arena.deinit();
++        }
++    };
++    const runs = try a.alloc(Band, counts.len);
++    const threads = try a.alloc(std.Thread, counts.len);
++    for (runs, threads, counts) |*r, *t, count| {
++        r.* = .{ .count = count };
++        t.* = try std.Thread.spawn(.{}, Band.run, .{ r, rom, w, inf });
++    }
++    for (threads) |t| t.join();
++    var all: std.ArrayList(warp.WalkedDoor) = .empty;
++    var entries: usize = 0;
++    var seeded: usize = 0;
++    for (runs) |r| {
++        if (r.failed) |e| return e;
++        try all.appendSlice(a, r.walked);
++        entries += r.entries;
++        seeded += r.seeded;
++        std.debug.print("crawl: count ${X:0>2}: {d} doors from {d} rooms-with-a-state ({d} seeded)\n", .{ r.count, r.walked.len, r.entries, r.seeded });
++    }
++    const walked = all.items;
+ 
+     var out: std.Io.Writer.Allocating = .init(a);
+     try warp.formatWalked(&out.writer, walked);
+     try std.Io.Dir.cwd().createDirPath(init.io, warp.crawl_dir);
+     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = path, .data = out.written() });
+     const dt = t0.durationTo(std.Io.Clock.awake.now(init.io));
+-    std.debug.print("crawl: {d} doors walked from {d} rooms-with-a-state ({d} seeded) in {d} s -> {s}\n", .{ walked.len, c.entries.items.len, c.seeded, @divTrunc(dt.toMilliseconds(), 1000), path });
++    std.debug.print("crawl: {d} doors walked from {d} rooms-with-a-state ({d} seeded), {d} counts, in {d} s -> {s}\n", .{ walked.len, entries, seeded, counts.len, @divTrunc(dt.toMilliseconds(), 1000), path });
+ }
+diff --git a/src/roster_main.zig b/src/roster_main.zig
+index d86eeb9..51d9ce6 100644
+--- a/src/roster_main.zig
++++ b/src/roster_main.zig
+@@ -40,6 +40,10 @@ pub fn main(init: std.process.Init) !void {
+         try tilesets(gpa, rom, out);
+         return;
+     };
++    if (sub_arg) |sub| if (std.mem.eql(u8, sub, "frontier")) {
++        try truthFrontier(gpa, rom, out);
++        return;
++    };
+     if (sub_arg) |sub| if (std.mem.eql(u8, sub, "ai")) {
+         const want = try std.fmt.parseInt(u16, args.next() orelse "0", 16);
+         var asg = try screens.assign(gpa, rom);
+@@ -244,3 +248,41 @@ fn tilesets(gpa: std.mem.Allocator, rom: []const u8, out: *std.Io.Writer) !void
+     for (walked_by, 0..) |n, i| try out.print(" ${X}:{d}", .{ map.first_bank + i, n });
+     try out.print("\n", .{});
+ }
++
++/// 1.0 Step 18c2: the door edges out of rooms the crawl reached from the new
++/// game into rooms it never did, and what each door tests.
++fn truthFrontier(gpa: std.mem.Allocator, rom: []const u8, out: *std.Io.Writer) !void {
++    var w = try roster.world(gpa, rom);
++    defer w.deinit(gpa);
++    var inf = try warp.Inference.init(gpa, rom, w);
++    defer inf.deinit(gpa);
++    const walked = try warp.loadWalked(gpa, rom);
++    var truth: std.AutoHashMapUnmanaged(u16, void) = .empty;
++    var tried: std.AutoHashMapUnmanaged(u32, void) = .empty;
++    for (walked) |wd| {
++        if (wd.to_truth) try truth.put(gpa, wd.to_room, {});
++        if (wd.from_truth) try truth.put(gpa, wd.from_room, {});
++        if (wd.from_truth) try tried.put(gpa, @as(u32, wd.from.bank) << 16 | @as(u32, wd.from.cell) << 8 | @intFromEnum(wd.dir), {});
++    }
++    var n: usize = 0;
++    for (w.edges) |e| {
++        const from = w.roomOf(e.from);
++        if (!truth.contains(from)) continue;
++        const to = warp.roomAt(w, e.dest.to);
++        if (to == roster.World.none or truth.contains(to)) continue;
++        var tb: [8]u8 = undefined;
++        const ths = inf.thresholdsOf(e.index, &tb);
++        const walked_here = tried.contains(@as(u32, e.from.bank) << 16 | @as(u32, e.from.cell) << 8 | @intFromEnum(e.dir));
++        try out.print("${X}:${X:0>2} {s: <5} door ${X:0>3} -> ${X}:${X:0>2} room {d}  thresholds {X}  {s}\n", .{ e.from.bank, e.from.cell, @tagName(e.dir), e.index, e.dest.to.bank, e.dest.to.cell, to, ths, if (walked_here) "walked elsewhere" else "never walked" });
++        n += 1;
++    }
++    try out.print("{d} frontier edges; {d} rooms from truth\n", .{ n, truth.count() });
++    var seen: [256]bool = @splat(false);
++    for (inf.decoded.ops.items) |op| switch (op) {
++        .if_met_less => |x| seen[x.met_count] = true,
++        else => {},
++    };
++    try out.print("IF_MET_LESS operands:", .{});
++    for (seen, 0..) |b, i| if (b) try out.print(" ${X:0>2}", .{i});
++    try out.print("\n", .{});
++}
+diff --git a/src/warp.zig b/src/warp.zig
+index 696929b..f4da166 100644
+--- a/src/warp.zig
++++ b/src/warp.zig
+@@ -1460,7 +1460,8 @@ pub fn assignWalked(allocator: std.mem.Allocator, rom: []const u8, walked: []con
+     defer allocator.free(arrivals);
+ 
+     // What each walked cell was drawn with, and which reading agrees more.
+-    const drawn = try allocator.alloc(?Tileset, asg.cells.len);
++    const Drawn = struct { t: Tileset, count: u8 };
++    const drawn = try allocator.alloc(?Drawn, asg.cells.len);
+     defer allocator.free(drawn);
+     var votes: [map.bank_count][2]usize = @splat(.{ 0, 0 });
+     for (asg.cells, unvetoed.cells, drawn) |c, u, *d| {
+@@ -1469,7 +1470,7 @@ pub fn assignWalked(allocator: std.mem.Allocator, rom: []const u8, walked: []con
+         if (r == roster.World.none or r >= arrivals.len) continue;
+         const a = arrivals[r] orelse continue;
+         const t = a.tileset orelse continue;
+-        d.* = t;
++        d.* = .{ .t = t, .count = a.count };
+         const bi = c.bank - map.first_bank;
+         if (c.choice) |ch| votes[bi][0] += @intFromBool(drawsAs(ch, t));
+         if (u.choice) |ch| votes[bi][1] += @intFromBool(drawsAs(ch, t));
+@@ -1489,8 +1490,9 @@ pub fn assignWalked(allocator: std.mem.Allocator, rom: []const u8, walked: []con
+     asg.vetoed_banks = std.mem.count(bool, &vetoed, &.{true});
+ 
+     for (asg.cells, drawn) |*c, d| {
+-        const t = d orelse continue;
+-        const loader = drawingLoader(decoded, ptrs, rows, s0, t) orelse continue;
++        const x = d orelse continue;
++        const t = x.t;
++        const loader = drawingLoader(decoded, ptrs, rows, s0, t, x.count) orelse continue;
+         if (c.choice) |old| asg.by_provenance[@intFromEnum(old.provenance)] -= 1;
+         c.choice = .{
+             .door_index = loader,
+@@ -1515,10 +1517,14 @@ fn drawsAs(ch: screens.Choice, t: Tileset) bool {
+ /// **An arrival's picture is the engine's** when it was walked out of a room
+ /// the crawl reached from the new game (`from_truth`), or when the door loads
+ /// both of them itself: then what the room before had does not reach the
+-/// picture, even out of a room the crawl seeded. At any count the crawl walked
+-/// the door at: a room whose picture the count changes (the lava) is arrived
+-/// in two ways and keeps the static reading.
+-pub const Arrival = struct { tileset: ?Tileset, door: u16 };
++/// picture, even out of a room the crawl seeded.
++///
++/// **At the highest count the room is arrived in at** (1.0 Step 18c2): the
++/// crawl walks at every count band, and a room the lava's tables redraw has
++/// a picture per band. The highest is where a player first sees it, and the
++/// new game's for every room reachable from it. Two pictures at that count
++/// are two ways in, and the room keeps the static reading.
++pub const Arrival = struct { tileset: ?Tileset, door: u16, count: u8 };
+ 
+ pub fn walkedArrivals(allocator: std.mem.Allocator, rom: []const u8, walked: []const WalkedDoor) ![]?Arrival {
+     var decoded = try door.decodeRegion(allocator, door.region(rom) orelse return Error.NoDoorData);
+@@ -1541,22 +1547,45 @@ pub fn walkedArrivals(allocator: std.mem.Allocator, rom: []const u8, walked: []c
+         const t = tilesetOfBlock(rom, wd.to_block) orelse continue;
+         const slot = &out[wd.to_room];
+         if (slot.*) |*a| {
++            if (wd.count < a.count) continue;
++            if (wd.count > a.count) {
++                slot.* = .{ .tileset = t, .door = wd.door, .count = wd.count };
++                continue;
++            }
+             const had = a.tileset orelse continue;
+             if (!had.bg.eql(t.bg) or had.tiletable != t.tiletable) a.tileset = null;
+-        } else slot.* = .{ .tileset = t, .door = wd.door };
++        } else slot.* = .{ .tileset = t, .door = wd.door, .count = wd.count };
+     }
+     return out;
+ }
+ 
+-/// A script that draws `t`: one that loads it whole, else the first that
+-/// loads its graphics and metatile table, which is all a picture needs.
+-pub fn drawingLoader(decoded: door.Decoded, ptrs: []const u8, rows: []const u8, s0: State, t: Tileset) ?u16 {
+-    if (loaderFor(decoded, ptrs, rows, s0, t)) |l| return l;
+-    for (1..door.pointer_count) |i| {
+-        if (screens.scriptOps(decoded, ptrs, i) == null) continue;
+-        const s, const wr = runScript(decoded, ptrs, rows, s0, @intCast(i), start_count);
+-        const need = w_bg | w_tiletable;
+-        if (wr & need == need and s.bg.eql(t.bg) and s.tiletable == t.tiletable) return @intCast(i);
++/// A script that draws `t` at Metroid count `count`: one that loads it whole,
++/// else one that loads its graphics and metatile table, which is all a picture
++/// needs. **A script that tests no count first**: it draws `t` at any count. A
++/// gated one draws `t` at `count`, and at another count what that count shows,
++/// which for the lava's rooms is the right picture too.
++pub fn drawingLoader(decoded: door.Decoded, ptrs: []const u8, rows: []const u8, s0: State, t: Tileset, count: u8) ?u16 {
++    for ([_]Writes{ w_tileset, w_bg | w_tiletable }) |need| {
++        for ([_]bool{ false, true }) |gated| {
++            for (1..door.pointer_count) |i| {
++                const ops = screens.scriptOps(decoded, ptrs, i) orelse continue;
++                var counted = false;
++                var queen = false;
++                var warps = false;
++                for (ops) |op| switch (op) {
++                    .if_met_less => counted = true,
++                    .warp => warps = true,
++                    .enter_queen, .exit_queen, .escape_queen => queen = true,
++                    else => {},
++                };
++                if (queen or !warps or counted != gated) continue;
++                const s, const wr = runScript(decoded, ptrs, rows, s0, @intCast(i), count);
++                if (wr & need != need) continue;
++                if (need == w_tileset and !Tileset.of(s).eql(t)) continue;
++                if (!s.bg.eql(t.bg) or s.tiletable != t.tiletable) continue;
++                return @intCast(i);
++            }
++        }
+     }
+     return null;
+ }
+@@ -1669,7 +1698,7 @@ pub const Inference = struct {
+ 
+ /// Bumped whenever the crawl would walk differently, so a stale result is
+ /// never read: the file name carries it.
+-pub const crawl_version: u32 = 2;
++pub const crawl_version: u32 = 3;
+ 
+ pub const crawl_dir = "build-out";
+ 
+diff --git a/src/warp_grade.zig b/src/warp_grade.zig
+index fab94d5..34593d0 100644
+--- a/src/warp_grade.zig
++++ b/src/warp_grade.zig
+@@ -215,11 +215,14 @@ pub fn cellsDrawn(a: std.mem.Allocator, rom: []const u8, asg: screens.Assignment
+         // Two rooms, five cells, are arrived in with lavaCavesFull, which no
+         // one script loads at the new game's count: `assignWalked` leaves
+         // them to the static reading, and they are counted apart.
+-        const loader = warp.drawingLoader(decoded, ptrs, warp.thresholds(rom), s0, t) orelse {
++        const loader = warp.drawingLoader(decoded, ptrs, warp.thresholds(rom), s0, t, arr.count) orelse {
+             out.unloadable += 1;
+             continue;
+         };
+         m.restore(base);
++        // At the count the arrival was walked at (1.0 Step 18c2).
++        m.write(0xD089, arr.count);
++        m.write(0xD09A, arr.count);
+         room.loadRoom(&m, loader, 4_000_000) catch return Error.ChainDidNotRun;
+         var block: [block_len]u8 = undefined;
+         for (&block, 0..) |*b, i| b.* = m.read(block_addr + @as(u16, @intCast(i)));

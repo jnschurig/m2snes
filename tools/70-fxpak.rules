@@ -1,0 +1,12 @@
+# FXPak Pro (SD2SNES) USB serial — make it openable by the logged-in user.
+#
+# The cart enumerates as a CDC-ACM device (1209:5a22) owned by root:uucp 0660, so SNI
+# can *list* it (that only reads sysfs) but fails to open it: "failed to open serial
+# port at any baud rate: Permission denied". TAG+="uaccess" hands the seat's active
+# user an ACL on the node, which takes effect on the next plug/trigger with no group
+# membership and no re-login.
+#
+# Install:
+#   sudo install -m 0644 tools/70-fxpak.rules /etc/udev/rules.d/70-fxpak.rules
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=tty
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="5a22", TAG+="uaccess"
