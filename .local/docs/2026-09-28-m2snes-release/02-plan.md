@@ -733,7 +733,7 @@ Code facts the design rests on (read 2026-10-04):
     Contributing text and `dependabot.yml`'s `target-branch` no longer name it, and Dependabot
     targets `main`. Step 14 is on `release-workflow`.
 
-- [ ] **Step 14: Release workflow and `release-verify`** (Features 2 and 5)
+- [x] **Step 14: Release workflow and `release-verify`** (Features 2 and 5)
   - [x] (Added 2026-10-06, James) pre-commit as a standard `.pre-commit-config.yaml`, for prek
     or pre-commit. `.githooks/pre-commit` is gone, and `mise run hooks` unsets
     `core.hooksPath`, links `.githooks/pre-push` into `.git/hooks`, then runs `prek install`
@@ -741,7 +741,7 @@ Code facts the design rests on (read 2026-10-04):
     when no new commits are sent (a tag on `main`). Checked: `pre-commit validate-config`
     passes. A clean stage passes under both tools, and a staged `fault.sfc` fails under both
     (exit 1).
-  - [ ] `.github/workflows/release.yml`, on `v*` tag push and `workflow_dispatch` (dry
+  - [x] `.github/workflows/release.yml`, on `v*` tag push and `workflow_dispatch` (dry
     run):
     - reuses CI's jobs (a reusable workflow `ci.yml` called with `workflow_call`), so the
       release binaries are the ones CI built and smoked;
@@ -755,7 +755,7 @@ Code facts the design rests on (read 2026-10-04):
     - on a tag: `gh release create --draft` with those assets (the only job with
       `contents: write`). On a dry run: uploads the archives and notes as workflow
       artifacts instead.
-  - [ ] `zig build release-verify -- <vX.Y.Z | --run <id>>` (`src/release_verify_main.zig`):
+  - [x] `zig build release-verify -- <vX.Y.Z | --run <id>>` (`src/release_verify_main.zig`):
     - downloads the draft's assets (`gh release download`) or a dry run's artifacts
       (`gh run download`); checks them against `SHA256SUMS`; unpacks;
     - `git worktree add` of the tag's (or run's) commit in a temp dir, `zig build release`
@@ -770,12 +770,12 @@ Code facts the design rests on (read 2026-10-04):
     fix any drift.
   - [x] Fault checks: a tampered archive fails the SHA256SUMS check; a binary built
     from a different commit fails the comparison; a wrong pin fails the run.
-  - [ ] Run the dry run on `release-workflow`, then `release-verify --run <id>`. Review the notes
+  - [x] Run the dry run on `release-workflow`, then `release-verify --run <id>`. Review the notes
     together.
-  - [ ] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
-    verify` passed with macOS and both Linux binaries run,.
+  - [x] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
+    verify` passed with macOS and both Linux binaries run.
 
-  - **Results 2026-10-06** (so far):
+  - **Results 2026-10-06:**
     - Archives are `m2snes-<tag>-<target>.tar.gz` (`.zip` for Windows), each holding one
       directory of that name. `ci/package.sh` builds them, `ci/release-notes.sh` renders
       `dist/release-notes.md`, and `ci/check-version.sh [--print | <tag>]` checks the tag.
@@ -803,6 +803,20 @@ Code facts the design rests on (read 2026-10-04):
       the retail run on all three targets. The worktree-removal bug those runs found
       is fixed: `std.process.exit` skips `defer`. A failing run now removes the worktree
       before it exits.
+
+    - Dry run: run 37405020614, from the push of `c61dd5a`. `ci / test` 794 s, `build` 108 s,
+      5 smoke legs 7–27 s, `version` (skipped, says so), `package` 5 s, `draft` skipped. Its
+      `release` artifact: 4 archives, `SHA256SUMS`, `notes.md`. The notes were reviewed by
+      James and stay as they are.
+    - `release-verify -- --run 37405020614`, first run: FAIL on one check. The x86_64 Linux
+      retail run under qemu died partway through the crawl, and the log did not say how it
+      ended. Everything else passed. Two direct qemu runs of the same binary made the pin,
+      with 16 GB free in the VM. So it is 1 failure in 5 x86_64 qemu runs: qemu-user
+      flakiness, not the binary. Not retried automatically. `pin.runBinary` now logs how the
+      process ended (exit code or signal), so a recurrence says more.
+    - Second run: **ok**. `release-verify: ok: m2snes v0.1.0, commit c61dd5a10db9 | retail
+      3452e391… | debug e215c9a5… | ran aarch64-macos, x86_64-linux-musl,
+      aarch64-linux-musl | compared` all four. About 13 min.
 
 - [ ] **Step 15: First release**
   - [ ] **(James)** Merge the release branch into `main` by PR once its checks are green.

@@ -219,7 +219,10 @@ pub fn runBinary(a: std.mem.Allocator, io: std.Io, r: Run, kind: Kind, log: *[]c
     if (r.crawl_cache) |c| try argv.appendSlice(a, &.{ "--crawl-cache", c });
     const res = try std.process.run(a, io, .{ .argv = argv.items, .cwd = .{ .path = r.workdir } });
     log.* = res.stderr;
-    if (res.term != .exited or res.term.exited != 0) return error.BinaryFailed;
+    if (res.term != .exited or res.term.exited != 0) {
+        log.* = try std.fmt.allocPrint(a, "{s}(it ended {any})\n", .{ res.stderr, res.term });
+        return error.BinaryFailed;
+    }
     var dir = try std.Io.Dir.cwd().openDir(io, r.workdir, .{});
     defer dir.close(io);
     const bytes = try dir.readFileAlloc(io, name, a, .limited(16 << 20));
