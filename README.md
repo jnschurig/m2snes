@@ -153,9 +153,17 @@ To cut a release:
    binaries CI built and smoke-tested, writes `SHA256SUMS` and the notes, and creates a
    **draft** release.
 4. `zig build release-verify -- vX.Y.Z` downloads the draft and checks it against
-   `SHA256SUMS`. It rebuilds the binaries from the tag and compares them byte for byte,
-   then runs the host's binary (and the Linux ones, under OrbStack) on the ROM against
-   the pins. Add its summary line to the notes, then publish.
+   `SHA256SUMS`. It rebuilds the binaries from the tag in a temporary worktree and
+   compares them byte for byte, then runs the host's binary on the ROM against the pins
+   at the tag. On macOS it runs the Linux ones too, in an OrbStack machine (the other
+   architecture's through `qemu-user`, installed in it). Add its summary line to the
+   notes, then publish.
+
+Running the release workflow by hand (Actions → release → Run workflow) is a dry run:
+no version check and no release, and the archives and notes are the run's `release`
+artifact. A push to a branch that changes the release machinery (`release.yml`,
+`ci.yml`, `ci/`, `dist/`, `build.zig.zon`) is a dry run too.
+`zig build release-verify -- --run <id>` grades it.
 
 A broken release is fixed forward: bump the version and release again.
 

@@ -137,12 +137,15 @@ pub fn main(init: std.process.Init) !void {
     const src = try std.fs.path.join(a, &.{ workdir, "src" });
     _ = try v.must(&.{ "git", "worktree", "prune" }, "git worktree prune failed");
     _ = try v.must(&.{ "git", "worktree", "add", "--detach", "--quiet", src, commit }, "cannot add a worktree of the commit");
+    v.src = src;
     defer removeWorktree(a, io, src);
     try v.out.print("..    build             zig build release in a worktree of {s}\n", .{short});
     try v.out.flush();
     const built = try std.process.run(a, io, .{ .argv = &.{ zig, "build", "release" }, .cwd = .{ .path = src } });
-    if (built.term != .exited or built.term.exited != 0)
-        die("zig build release at {s} failed:\n{s}", .{ short, built.stderr });
+    if (built.term != .exited or built.term.exited != 0) {
+        v.fail("build", "zig build release at {s} failed:\n{s}", .{ short, built.stderr });
+        v.finish("{s}", .{label});
+    }
     for (release_options.release_targets, bins) |t, bin| {
         const ours = try std.fs.path.join(a, &.{ src, "zig-out", "release", t, exeName(t) });
         try v.compare(t, bin, ours, short);
@@ -152,10 +155,19 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    // The commit's pins speak only for binaries the commit builds.
+    if (v.failures != 0) v.finish("the downloads are not {s}'s build, so they were not run", .{short});
+
     // ---- The pins and the notes ----------------------------------------------
     const pins_path = pins_file orelse try std.fs.path.join(a, &.{ src, pin.cart_path });
-    const pins_text = std.Io.Dir.cwd().readFileAlloc(io, pins_path, a, .limited(1 << 16)) catch |e| die("cannot read {s}: {s}", .{ pins_path, @errorName(e) });
-    const want = pin.parse(pins_text) catch |e| die("{s}: {s}", .{ pins_path, @errorName(e) });
+    const pins_text = std.Io.Dir.cwd().readFileAlloc(io, pins_path, a, .limited(1 << 16)) catch |e| {
+        v.fail("pins", "cannot read {s}: {s}", .{ pins_path, @errorName(e) });
+        v.finish("{s}", .{label});
+    };
+    const want = pin.parse(pins_text) catch |e| {
+        v.fail("pins", "{s}: {s}", .{ pins_path, @errorName(e) });
+        v.finish("{s}", .{label});
+    };
     if (notes) |n| {
         var missing: std.ArrayList([]const u8) = .empty;
         for ([_]pin.Kind{ .retail, .debug }) |k| {
@@ -201,7 +213,7 @@ pub fn main(init: std.process.Init) !void {
         }
         const wd = try std.fs.path.join(a, &.{ workdir, "run", t });
         try std.Io.Dir.cwd().createDirPath(io, wd);
-        try v.out.print("..    {s: <17} retail and debug carts from your ROM (about a minute)\n", .{t});
+        try v.out.print("..    {s: <17} retail and debug carts from your ROM ({s})\n", .{ t, if (prefix.len == 3) "several minutes under qemu" else "about a minute" });
         try v.out.flush();
         const graded = try pin.gradeAgainst(a, io, want, .{ .exe = bin, .rom = rom, .workdir = wd, .prefix = prefix }, t, v.out);
         if (graded) try ran.append(a, t) else v.failures += 1;
@@ -225,6 +237,9 @@ const Verify = struct {
     io: std.Io,
     out: *std.Io.Writer,
     failures: usize = 0,
+    /// The worktree, once added: removed on every way out, since
+    /// `std.process.exit` runs no `defer`.
+    src: ?[]const u8 = null,
 
     fn ok(v: *Verify, label: []const u8, comptime fmt: []const u8, args: anytype) !void {
         try v.out.print("ok    {s: <17} ", .{label});
@@ -239,8 +254,9 @@ const Verify = struct {
         v.out.flush() catch {};
     }
 
-    /// Prints the failure count and exits 1.
+    /// Removes the worktree, prints the failure count and exits 1.
     fn finish(v: *Verify, comptime fmt: []const u8, args: anytype) noreturn {
+        if (v.src) |src| removeWorktree(v.a, v.io, src);
         v.out.print("release-verify: FAIL: {d} check(s): ", .{v.failures}) catch {};
         v.out.print(fmt ++ "\n", args) catch {};
         v.out.flush() catch {};
@@ -253,6 +269,7 @@ const Verify = struct {
         const r = try std.process.run(v.a, v.io, .{ .argv = argv });
         if (r.term != .exited or r.term.exited != 0) {
             v.out.flush() catch {};
+            if (v.src) |src| removeWorktree(v.a, v.io, src);
             die("{s}: {s}\n{s}", .{ argv[0], why, r.stderr });
         }
         return std.mem.trim(u8, r.stdout, " \t\r\n");
@@ -358,7 +375,7 @@ const Verify = struct {
                 Sha256.hash(got, &d, .{});
                 try v.ok(t, "{s} is byte-identical to {s}'s build (sha256 {x})", .{ what, short, d[0..8] });
             }
-        } else v.fail(t, "{s} differs from {s}'s ({d} bytes, not {d})", .{ what, short, got.len, want.len });
+        } else v.fail(t, "{s} differs from {s}'s from byte {d} ({d} bytes, not {d})", .{ what, short, std.mem.indexOfDiff(u8, got, want).?, got.len, want.len });
     }
 
     /// The host's binary says the release's version and commit.

@@ -764,16 +764,45 @@ Code facts the design rests on (read 2026-10-04):
       commit; runs both Linux binaries the same way through `orbctl run` when OrbStack is
       present, else prints `not run:`;
     - prints one summary line (version, commit, carts' SHA-1s, targets run, targets compared).
-  - [ ] `ci/check-version.sh` tested locally: `v0.1.0` passes, `v9.9.9`, `0.1.0` and
+  - [x] `ci/check-version.sh` tested locally: `v0.1.0` passes, `v9.9.9`, `0.1.0` and
     `v0.1.0-x` fail.
-  - [ ] Re-read the README's CI and release sections against what Steps 13–14 built, and
+  - [x] Re-read the README's CI and release sections against what Steps 13–14 built, and
     fix any drift.
-  - [ ] Fault checks: a tampered archive fails the SHA256SUMS check; a binary built
+  - [x] Fault checks: a tampered archive fails the SHA256SUMS check; a binary built
     from a different commit fails the comparison; a wrong pin fails the run.
   - [ ] Run the dry run on `release-workflow`, then `release-verify --run <id>`. Review the notes
     together.
   - [ ] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
     verify` passed with macOS and both Linux binaries run,.
+
+  - **Results 2026-10-06** (so far):
+    - Archives are `m2snes-<tag>-<target>.tar.gz` (`.zip` for Windows), each holding one
+      directory of that name. `ci/package.sh` builds them, `ci/release-notes.sh` renders
+      `dist/release-notes.md`, and `ci/check-version.sh [--print | <tag>]` checks the tag.
+    - **Changed from the plan:** GitHub only offers `workflow_dispatch` once the file is on
+      the default branch. So `release.yml` also dry-runs on a branch push that changes the
+      release machinery (`release.yml`, `ci.yml`, `ci/`, `dist/`, `build.zig.zon`). Paths
+      are not applied to tags. `ci.yml`'s concurrency group now names the workflow, so a
+      release run never cancels a branch's CI.
+    - `release-verify` also takes `--dir <dir> --commit <rev>` and `--pins <file>`, for the
+      fault checks. It also checks that each archive holds exactly the four files, and that
+      LICENSE, THIRD-PARTY-NOTICES and README.txt equal the commit's. It checks that the notes
+      carry both pins and the commit, and that the host binary's `--version` names both.
+      After a byte mismatch it stops, since the commit's pins no longer speak for the
+      downloads.
+    - OrbStack: James created an arm64 `ubuntu` machine. Rosetta refuses the x86_64 binary
+      (`rosetta error: bss_size overflow`), so (James) `qemu-user` is installed in the
+      machine, and release-verify runs that binary through `orbctl run qemu-x86_64`. It
+      prints `not run:` without qemu.
+    - Local run, `--dir` on a package of `dc73078`: 4 archives ok, 4 binaries
+      byte-identical, notes ok, and macOS, x86_64 Linux (qemu) and arm64 Linux made both
+      pins. Windows compared only. 13 min, mostly qemu.
+    - Fault checks: a byte flipped in an archive fails `SHA256SUMS` and stops. An unlisted
+      archive fails. `--commit HEAD~1` fails all four comparisons (first differing byte
+      named) and runs nothing. A wrong retail pin (`--pins`) fails the notes check and
+      the retail run on all three targets. The worktree-removal bug those runs found
+      is fixed: `std.process.exit` skips `defer`. A failing run now removes the worktree
+      before it exits.
 
 - [ ] **Step 15: First release**
   - [ ] **(James)** Merge the release branch into `main` by PR once its checks are green.

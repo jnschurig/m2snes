@@ -1,7 +1,11 @@
 # Release (release Step 14; Feature 5). On a `v*` tag: CI's jobs, the version
-# check, the archives, SHA256SUMS and the notes, then a draft release. Run by
-# hand (workflow_dispatch) it is a dry run: the same, with no version check,
-# and the archives and notes uploaded as the run's `release` artifact instead.
+# check, the archives, SHA256SUMS and the notes, then a draft release.
+#
+# Anything else is a dry run: the same, with no version check, and the
+# archives and notes uploaded as the run's `release` artifact instead. It runs
+# by hand (workflow_dispatch, which GitHub offers only once this file is on
+# the default branch) and on a branch push that changes the release machinery,
+# so a change to it is exercised before it is merged.
 #
 # Nothing here touches the ROM. `zig build release-verify` grades the draft
 # (or a dry run) locally before James publishes it.
@@ -10,6 +14,14 @@ name: release
 on:
   push:
     tags: ["v*"]
+    # GitHub does not apply `paths` to tag pushes: every v* tag runs.
+    branches: ["**"]
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/ci.yml
+      - ci/**
+      - dist/**
+      - build.zig.zon
   workflow_dispatch:
 
 permissions:
@@ -38,7 +50,7 @@ jobs:
       - if: startsWith(github.ref, 'refs/tags/')
         run: sh ci/check-version.sh "$GITHUB_REF_NAME"
       - if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: echo "dry run on $GITHUB_REF_NAME: no tag, so the version check is skipped"
+        run: echo "dry run on $GITHUB_REF_NAME (no tag), so the version check is skipped"
 
   package:
     name: package
