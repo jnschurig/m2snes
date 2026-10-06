@@ -21,6 +21,7 @@ updated:
   - 2026-10-05T21:07:49Z
   - 2026-10-05T21:57:39Z
   - 2026-10-05T23:09:17Z
+  - 2026-10-06T04:22:12Z
 working_directory: /Users/james/git/m2snes-gh
 ---
 
@@ -180,7 +181,7 @@ sequential.
   target built locally from the same commit, on any dev host. `release-verify` checks this
   for every target, every release.
 - **`zig build release-verify -- vX.Y.Z`** (local, needs the ROM) runs against the tag's
-  **draft** Release:
+  Release:
   - downloads every archive and checks it against `SHA256SUMS`;
   - checks each binary byte-identical to a local cross-build of the tag's commit;
   - runs the host's binary on the ROM, retail and debug, against `pins/cart.txt`;
@@ -195,8 +196,9 @@ sequential.
 - Windows binaries (and macOS ones on a non-Mac dev host) are graded only by byte-identity
   plus CI's native ROM-free smoke run (Feature 1), unless a host of that OS runs
   `release-verify`.
-- James publishes the draft only after `release-verify` passes. The published notes carry
-  its summary line.
+- ~~James publishes the draft only after `release-verify` passes.~~ *(Superseded
+  2026-10-06, James: the release is published by the workflow. `release-verify` runs on it
+  afterwards, its summary line is added to the notes, and a failure is fixed forward.)*
 - The release notes publish the retail and debug SHA-1s from `pins/cart.txt` at the tag,
   which `release-verify` graded, not typed by hand.
 
@@ -285,21 +287,22 @@ sequential.
 ### 5. Release mechanism
 **Acceptance Criteria:**
 - Pushing a tag `vX.Y.Z` runs a workflow that re-runs the CI checks and creates a
-  **draft** GitHub Release with `gh release create --draft` (no third-party release
-  action): archives for macOS arm64, Linux x86_64, Linux arm64 and Windows x86_64 (no
+  **published** GitHub Release with `gh release create` (no third-party release action;
+  2026-10-06, James: was a draft): archives for macOS arm64, Linux x86_64, Linux arm64 and Windows x86_64 (no
   Windows arm64 archive in 0.1.0), a `SHA256SUMS` file, and in each archive `m2snes`, LICENSE,
   THIRD-PARTY-NOTICES and a short player README.
 - The tag must match `build.zig.zon`'s version or the workflow fails. The check is a
   script unit-tested locally with a mismatched name; no throwaway tag is pushed to test it.
 - `v0.1.0` is the first real run. A release that turns out broken is fixed forward: bump
-  the version, tag again, and delete the broken tag and its draft (or, if published and
-  unusable, the release), noting why in the next release's notes.
+  the version, tag again, and delete the broken tag and its release, noting why in the next
+  release's notes.
 - The first release's notes carry no `pins/history.md` entries (no previous tag).
 - Linux binaries are statically linked (musl / no libc), runnable on any distro.
 - Archive format: `.tar.gz` for macOS/Linux, `.zip` for Windows.
 - The notes come from a template plus the pins at the tag, the trademark notice, and
   (when the pin moved since the previous release) the `pins/history.md` entries since then.
-- James runs `release-verify`, adds its summary line to the notes, and publishes.
+- James runs `release-verify` on the published release and its summary line is added to
+  the notes.
 - `v*` tags are protected by a ruleset (only James can create them).
 
 **Out of Scope:**
@@ -416,7 +419,7 @@ memories it needs without snes_game_dev.
 - **GitHub** (`jnschurig/m2snes`, public) replaces GitLab as the public home. CI builds the
   macOS binary too, so the dev machine can be any platform.
 - **No ROM in CI.** ROM checks run locally: the pre-push hook (`verify`) and
-  `release-verify` before publishing.
+  `release-verify` (after publishing, since 2026-10-06).
 - **Grading:** CI binaries are proven byte-identical to local builds per target, and the
   host's binary (plus Linux through OrbStack) is run against the pins.
 - **History:** fresh start, one audited commit.
@@ -432,3 +435,12 @@ memories it needs without snes_game_dev.
   is not reproducible. Four targets ship; Windows on ARM runs the x86_64 binary under
   emulation, which CI smoke-tests on `windows-11-arm`. Tracked as m2snes
   `docs/feature_tracker.md` F15.
+
+## Decisions (James, 2026-10-06)
+- **Fix forward from v0.1.0 as v0.1.1.** v0.1.0 was tagged on a branch commit and a release
+  without assets was published by hand; both releases are deleted.
+- **A tag publishes.** Pushing `vX.Y.Z` (from `main`, through the hook's `pin-check`) makes CI
+  build, smoke-test and package the binaries and publish the release with them. No draft;
+  `release-verify` grades it afterwards.
+- **Hooks:** pre-commit is a standard `.pre-commit-config.yaml` (prek or pre-commit);
+  pre-push stays native.

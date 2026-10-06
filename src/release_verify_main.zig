@@ -1,7 +1,7 @@
 //! `zig build release-verify` (release Step 14; Features 2 and 5): a release's
 //! downloads, graded locally before James publishes it.
 //!
-//!   -- <vX.Y.Z>                  the tag's draft release (`gh release download`)
+//!   -- <vX.Y.Z>                  the tag's release (`gh release download`)
 //!   -- --run <id>                a release workflow dry run's `release`
 //!                                artifact (`gh run download`)
 //!   -- --dir <dir> --commit <rev>  downloads already on disk, against <rev>
@@ -23,7 +23,7 @@
 //!     and both Linux binaries the same way through `orbctl run` on macOS when
 //!     OrbStack has a Linux machine, the other architecture's through
 //!     `qemu-<arch>` in it (`not run:` otherwise).
-//! Then one summary line, which James adds to the notes before publishing.
+//! Then one summary line, which goes in the release's notes.
 //!
 //! The ROM never leaves the machine: the carts are hashed and deleted.
 

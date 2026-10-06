@@ -150,14 +150,14 @@ To cut a release:
 1. Set the version in `build.zig.zon` on a branch, and merge it into `main` by PR.
 2. Tag `main` with `vX.Y.Z` and push the tag. The pre-push hook runs `pin-check`.
 3. The release workflow checks that the tag matches `build.zig.zon`, packages the
-   binaries CI built and smoke-tested, writes `SHA256SUMS` and the notes, and creates a
-   **draft** release.
-4. `zig build release-verify -- vX.Y.Z` downloads the draft and checks it against
+   binaries CI built and smoke-tested, writes `SHA256SUMS` and the notes, and publishes
+   the release with them. Don't create the release by hand.
+4. `zig build release-verify -- vX.Y.Z` downloads the release and checks it against
    `SHA256SUMS`. It rebuilds the binaries from the tag in a temporary worktree and
    compares them byte for byte, then runs the host's binary on the ROM against the pins
    at the tag. On macOS it runs the Linux ones too, in an OrbStack machine (the other
    architecture's through `qemu-user`, installed in it). Add its summary line to the
-   notes, then publish.
+   release's notes.
 
 Running the release workflow by hand (Actions → release → Run workflow) is a dry run:
 no version check and no release, and the archives and notes are the run's `release`
