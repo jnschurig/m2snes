@@ -25,10 +25,9 @@ for your machine:
 | macOS, Apple silicon | `aarch64-macos` (`.tar.gz`) |
 | Linux, x86_64 | `x86_64-linux-musl` (`.tar.gz`) |
 | Linux, arm64 | `aarch64-linux-musl` (`.tar.gz`) |
-| Windows, x86_64 | `x86_64-windows-gnu` (`.zip`) |
-| Windows, arm64 | `aarch64-windows-gnu` (`.zip`) |
+| Windows, x86_64 or arm64 | `x86_64-windows-gnu` (`.zip`) |
 
-Intel Macs are not supported. The Linux builds are static and run on any distribution.
+Windows on ARM runs the x86_64 build under emulation. Intel Macs are not supported. The Linux builds are static and run on any distribution.
 To check the download, compare its SHA-256 with the release's `SHA256SUMS`
 (`shasum -a 256 <archive>` on macOS, `sha256sum` on Linux,
 `certutil -hashfile <archive> SHA256` on Windows).
@@ -137,13 +136,13 @@ every rung, what it compares against, and the fault that shows it is not vacuous
 GitHub Actions runs on every push and pull request, **without the ROM**. The ROM cannot
 be distributed, so the repository has no secrets and a runner has nothing to fetch it
 with. CI runs `zig build test` and `zig build policy`, builds the release binaries
-for all five targets, and smoke-tests each one natively (`ci/smoke.sh`). The smoke test
+for all four targets, and smoke-tests each one natively (`ci/smoke.sh`). The smoke test
 runs outside any checkout, with no Zig on `PATH`, and checks that a file of zeros is
 refused. CI does not replace `verify`.
 
 ### Releasing
 
-`zig build release` cross-compiles `m2snes` (ReleaseSafe, stripped) for the five
+`zig build release` cross-compiles `m2snes` (ReleaseSafe, stripped) for the four
 targets into `zig-out/release/<target>/`. The Linux binaries are static. The Windows
 ones import only `ntdll` and `KERNEL32`, and the macOS one links only `libSystem`.
 `release` scans each for host paths with `pathscan`. A build is reproducible: the same

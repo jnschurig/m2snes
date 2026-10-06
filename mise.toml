@@ -19,6 +19,10 @@ M2_ROM = "{{ exec(command='for p in \"$M2_ROM\" \"$PWD/metroid2.gb\" \"$HOME/rom
 # print `not run:`.
 MESEN = "{{ exec(command='for p in \"$MESEN\" \"$HOME/Games/mesen/Mesen\" /Applications/Mesen.app/Contents/MacOS/Mesen \"$(command -v Mesen || true)\"; do [ -n \"$p\" ] && [ -x \"$p\" ] && echo \"$p\" && break; done; :') }}"
 
+# SNI, which tools/fxpak.sh starts to reach the FXPak Pro. Empty means absent:
+# the script then looks on PATH, and says so if it is not there either.
+SNI_BIN = "{{ exec(command='for p in \"$SNI_BIN\" \"$(command -v sni || true)\" \"$HOME/go/bin/sni\"; do [ -n \"$p\" ] && [ -x \"$p\" ] && echo \"$p\" && break; done; :') }}"
+
 [tasks.verify]
 description = "The gate: unit tests, tracked-file policy, and the ROM-dependent checks (needs the ROM)"
 run = "zig build verify"

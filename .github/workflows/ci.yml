@@ -1,0 +1,131 @@
+# CI: ROM-free, on every branch push and pull request. The ROM cannot be
+# distributed, so this repository holds no secrets and no runner can fetch it;
+# every ROM check runs locally (the pre-push hook, `verify`, `release-verify`).
+# CI does not replace `zig build verify`.
+#
+# Third-party actions are pinned by commit SHA; Dependabot keeps the pins
+# current (.github/dependabot.yml).
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Zig from mise.toml, verified against mise.lock (the action adds --locked).
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      # blargg's SM83 suites (public, not ours, never tracked), at a pinned commit.
+      - run: sh tools/get-testroms.sh
+      # No M2_ROM: the ROM tests print `not run:`. Includes the pin/history
+      # agreement check, so a PR cannot move a pin without a reason line.
+      - run: zig build test
+      # Size ceiling and forbidden paths; the ROM n-gram rule prints `not run:`.
+      - run: zig build policy
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      # Every release target, then `pathscan` over each: no build-host path ships.
+      - run: zig build release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m2snes-aarch64-macos
+          path: zig-out/release/aarch64-macos/m2snes
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m2snes-x86_64-linux-musl
+          path: zig-out/release/x86_64-linux-musl/m2snes
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m2snes-aarch64-linux-musl
+          path: zig-out/release/aarch64-linux-musl/m2snes
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m2snes-x86_64-windows-gnu
+          path: zig-out/release/x86_64-windows-gnu/m2snes.exe
+          if-no-files-found: error
+
+  # The binaries `build` made, run with no mise and no Zig: natively, and the
+  # x86_64 Windows one also under emulation on Windows on ARM.
+  smoke:
+    name: smoke (${{ matrix.runner }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, target: aarch64-macos, exe: m2snes }
+          - { runner: ubuntu-latest, target: x86_64-linux-musl, exe: m2snes }
+          - { runner: ubuntu-24.04-arm, target: aarch64-linux-musl, exe: m2snes }
+          - { runner: windows-latest, target: x86_64-windows-gnu, exe: m2snes.exe }
+          # Windows on ARM runs the x86_64 binary (no aarch64-windows build:
+          # build.zig's release_targets says why).
+          - { runner: windows-11-arm, target: x86_64-windows-gnu, exe: m2snes.exe }
+    defaults:
+      run:
+        # Git Bash on Windows.
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: m2snes-${{ matrix.target }}
+          path: bin
+      # Artifacts do not keep the executable bit.
+      - run: chmod +x "bin/${{ matrix.exe }}"
+      - run: sh ci/smoke.sh "bin/${{ matrix.exe }}"
+
+  # A Dependabot PR may be merged in the web UI, past the hooks, only because
+  # it touches nothing outside .github/. Skipped (which counts as passing) on
+  # every other PR and push.
+  dependabot-scope:
+    name: dependabot-scope
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: ci
+      # Both sides of a rename, so a file moved into .github/ still counts.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: >-
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files"
+          --jq '.[] | .filename, (.previous_filename // empty)'
+          | sh ci/dependabot-scope.sh

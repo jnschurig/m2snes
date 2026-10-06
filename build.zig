@@ -1643,14 +1643,17 @@ fn zonVersion(b: *std.Build) []const u8 {
     return quotedAfter(text, ".version = \"") orelse @panic("build.zig.zon has no .version");
 }
 
-/// The targets a release ships (requirements, Feature 5). Windows arm64 is
-/// built but untested: no runner grades it.
+/// The targets a release ships (requirements, Feature 5). No Windows arm64:
+/// with Zig 0.16 a stripped aarch64-windows binary segfaults at startup on
+/// windows-11-arm, even a hello world, and an unstripped one is not
+/// reproducible (its PDB GUID hashes the build's absolute paths). Windows on
+/// ARM runs the x86_64 binary under emulation; CI smoke-tests it there
+/// (release Step 13; docs/feature_tracker.md F15).
 const release_targets = [_][]const u8{
     "aarch64-macos",
     "x86_64-linux-musl",
     "aarch64-linux-musl",
     "x86_64-windows-gnu",
-    "aarch64-windows-gnu",
 };
 
 /// The `m2snes` binary's optimize mode, on every target. ReleaseSafe, so a

@@ -18,7 +18,8 @@
 set -e
 cd "$(dirname "$0")/.."
 DEST=vendor/testroms
-BASE=https://raw.githubusercontent.com/retrio/gb-test-roms/master
+# Pinned to a commit (master since 2015), so CI fetches the same bytes.
+BASE=https://raw.githubusercontent.com/retrio/gb-test-roms/c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15
 
 mkdir -p "$DEST/cpu_instrs"
 
