@@ -197,6 +197,9 @@ pub const Run = struct {
     workdir: []const u8,
     /// Null is the player's run, which crawls.
     crawl_cache: ?[]const u8 = null,
+    /// What runs the binary, if not the host: `orbctl run` for a Linux one on
+    /// macOS (`release-verify`).
+    prefix: []const []const u8 = &.{},
 };
 
 pub const RunError = error{BinaryFailed};
@@ -210,6 +213,7 @@ pub fn runBinary(a: std.mem.Allocator, io: std.Io, r: Run, kind: Kind, log: *[]c
         .crawl => unreachable, // the binary writes no crawl without the cache
     };
     var argv: std.ArrayList([]const u8) = .empty;
+    try argv.appendSlice(a, r.prefix);
     try argv.appendSlice(a, &.{ r.exe, r.rom, "-o", name });
     if (kind == .debug) try argv.append(a, "--debug");
     if (r.crawl_cache) |c| try argv.appendSlice(a, &.{ "--crawl-cache", c });
@@ -236,6 +240,12 @@ pub fn gradeBinary(a: std.mem.Allocator, io: std.Io, r: Run, label: []const u8, 
         try out.print("FAIL  {s: <17} {s}: {s}\n", .{ label, cart_path, @errorName(e) });
         return false;
     };
+    return gradeAgainst(a, io, want, r, label, out);
+}
+
+/// `gradeBinary` against pins the caller read: `release-verify` grades
+/// against `pins/cart.txt` at the release's commit, not the working tree's.
+pub fn gradeAgainst(a: std.mem.Allocator, io: std.Io, want: Pins, r: Run, label: []const u8, out: *std.Io.Writer) !bool {
     var ok = true;
     for ([_]Kind{ .retail, .debug }) |k| {
         var log: []const u8 = "";

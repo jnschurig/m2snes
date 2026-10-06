@@ -1,0 +1,95 @@
+# Release (release Step 14; Feature 5). On a `v*` tag: CI's jobs, the version
+# check, the archives, SHA256SUMS and the notes, then a draft release. Run by
+# hand (workflow_dispatch) it is a dry run: the same, with no version check,
+# and the archives and notes uploaded as the run's `release` artifact instead.
+#
+# Nothing here touches the ROM. `zig build release-verify` grades the draft
+# (or a dry run) locally before James publishes it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      # ci.yml's dependabot-scope asks for it (and is skipped here).
+      pull-requests: read
+
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: sh ci/check-version.sh "$GITHUB_REF_NAME"
+      - if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "dry run on $GITHUB_REF_NAME: no tag, so the version check is skipped"
+
+  package:
+    name: package
+    needs: [ci, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The previous v* tag and its pins/history.md, for the notes.
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: m2snes-*
+          path: bin
+      - name: archives, SHA256SUMS and notes
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=$GITHUB_REF_NAME
+          else
+            version=$(sh ci/check-version.sh --print)
+          fi
+          sh ci/package.sh bin "$version" out
+          sh ci/release-notes.sh "$version" > out/notes.md
+          echo "$version" > out/version
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: out/
+          if-no-files-found: error
+
+  draft:
+    name: draft
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The only job that can write.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
+          --repo "$GITHUB_REPOSITORY"
+          --title "m2snes $GITHUB_REF_NAME"
+          --notes-file out/notes.md
+          out/m2snes-* out/SHA256SUMS
