@@ -69,13 +69,9 @@ jobs:
           name: m2snes-x86_64-windows-gnu
           path: zig-out/release/x86_64-windows-gnu/m2snes.exe
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: m2snes-aarch64-windows-gnu
-          path: zig-out/release/aarch64-windows-gnu/m2snes.exe
-          if-no-files-found: error
 
-  # The binaries `build` made, run natively with no mise and no Zig.
+  # The binaries `build` made, run with no mise and no Zig: natively, and the
+  # x86_64 Windows one also under emulation on Windows on ARM.
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: build
@@ -89,7 +85,9 @@ jobs:
           - { runner: ubuntu-latest, target: x86_64-linux-musl, exe: m2snes }
           - { runner: ubuntu-24.04-arm, target: aarch64-linux-musl, exe: m2snes }
           - { runner: windows-latest, target: x86_64-windows-gnu, exe: m2snes.exe }
-          - { runner: windows-11-arm, target: aarch64-windows-gnu, exe: m2snes.exe }
+          # Windows on ARM runs the x86_64 binary (no aarch64-windows build:
+          # build.zig's release_targets says why).
+          - { runner: windows-11-arm, target: x86_64-windows-gnu, exe: m2snes.exe }
     defaults:
       run:
         # Git Bash on Windows.

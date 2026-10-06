@@ -88,7 +88,8 @@ downloads it, runs it on their ROM, and gets a `.sfc`. Nothing else is installed
   only by a deliberate commit that says why. A mutated output must fail the grade.
 - A released binary runs on a machine with no Zig, mise or repo checkout, from any
   working directory. CI checks this ROM-free on a native runner for every tested target
-  (macOS arm64, Linux x86_64, Linux arm64, Windows x86_64, Windows arm64): outside the
+  (macOS arm64, Linux x86_64, Linux arm64, Windows x86_64, and the x86_64 binary on Windows
+  arm64; see the 2026-10-05 decision on Windows arm64): outside the
   checkout, with no `zig` on `PATH`, the binary runs `--version` and `--help`, and
   refuses a synthetic non-ROM file with a non-zero exit, writing nothing.
 - **Location-independent:** the binary behaves the same wherever it is installed and
@@ -224,7 +225,7 @@ sequential.
   - the cross-compile of every release target once, on Linux, uploading only the
     binaries as workflow artifacts, plus the no-build-host-path scan (Feature 2);
   - the native smoke run (Feature 1) of those same artifacts on macOS arm64, Linux x86_64,
-    Linux arm64, Windows x86_64 and Windows arm64 runners;
+    Linux arm64, Windows x86_64 and Windows arm64 runners (the last runs the x86_64 binary);
   - for a Dependabot PR, a check that it touches only `.github/`.
 - **Tools come from `mise.toml`**: CI installs them with `jdx/mise-action`, so Zig's
   version has one pin. A committed `mise.lock` holds per-platform checksums for every
@@ -282,8 +283,8 @@ sequential.
 **Acceptance Criteria:**
 - Pushing a tag `vX.Y.Z` runs a workflow that re-runs the CI checks and creates a
   **draft** GitHub Release with `gh release create --draft` (no third-party release
-  action): archives for macOS arm64, Linux x86_64, Linux arm64, Windows x86_64 and
-  Windows arm64, a `SHA256SUMS` file, and in each archive `m2snes`, LICENSE,
+  action): archives for macOS arm64, Linux x86_64, Linux arm64 and Windows x86_64 (no
+  Windows arm64 archive in 0.1.0), a `SHA256SUMS` file, and in each archive `m2snes`, LICENSE,
   THIRD-PARTY-NOTICES and a short player README.
 - The tag must match `build.zig.zon`'s version or the workflow fails. The check is a
   script unit-tested locally with a mismatched name; no throwaway tag is pushed to test it.
@@ -422,3 +423,8 @@ memories it needs without snes_game_dev.
   third-party workflow linting, a fast `pre-commit` policy scan, one pre-push tier chosen by
   measurement, Dependabot for action pins, Windows arm64 smoke-tested natively. Dependabot PRs touching only `.github/`
   may be merged in the web UI.
+- **No Windows arm64 build in 0.1.0** (Step 13). With Zig 0.16 a stripped
+  `aarch64-windows-gnu` binary segfaults at startup on `windows-11-arm`, and an unstripped one
+  is not reproducible. Four targets ship; Windows on ARM runs the x86_64 binary under
+  emulation, which CI smoke-tests on `windows-11-arm`. Tracked as m2snes
+  `docs/feature_tracker.md` F15.

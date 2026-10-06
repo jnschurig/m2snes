@@ -678,7 +678,7 @@ Code facts the design rests on (read 2026-10-04):
     read`, `concurrency` per ref with cancel-in-progress off for tags, `timeout-minutes` on
     every job. All third-party actions pinned by SHA.
     - `test` (ubuntu-latest): `jdx/mise-action`, `zig build test`, `zig build policy`.
-    - `build` (ubuntu-latest): `zig build release` (scan included); upload the five
+    - `build` (ubuntu-latest): `zig build release` (scan included); upload the
       binaries, only, as artifacts.
     - `smoke` matrix (`macos-15`, `ubuntu-latest`, `ubuntu-24.04-arm`, `windows-latest`,
       `windows-11-arm`): download its target's binary, run `ci/smoke.sh` (no mise, no zig).
@@ -725,7 +725,7 @@ Code facts the design rests on (read 2026-10-04):
     from a different commit fails the comparison; a wrong pin fails the run.
   - [ ] Run the dry run on `dev`, then `release-verify --run <id>`. Review the notes
     together.
-  - [ ] Verify: the dry run produced five archives, `SHA256SUMS` matches them, `release-
+  - [ ] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
     verify` passed with macOS and both Linux binaries run,.
 
 - [ ] **Step 15: First release**

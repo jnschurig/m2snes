@@ -199,6 +199,21 @@ same work: a `B` entry is the slice's share of one or more `F` entries, named wh
   - Status: unstarted.
   - Graded by: none yet.
 
+- [ ] **F15. A native Windows arm64 build.** 0.1.0 ships four targets; Windows on ARM runs
+  the x86_64 binary under emulation, and CI smoke-tests it on `windows-11-arm`. With Zig
+  0.16.0, any `-fstrip` `aarch64-windows-gnu` binary segfaults at startup there, even a hello
+  world, on its first `std.debug.print`; `-fsingle-threaded` and an empty `main` run. The same
+  build unstripped runs, but is not reproducible: lld-link's `/Brepro` hashes the PDB, which
+  holds the build's absolute paths, into the PE timestamp and CodeView GUID (20 bytes). Found
+  by CI's smoke run in release Step 13 and bisected on the `diag/winarm` branch. Suspected
+  cause, not confirmed: lld-link's default `/OPT:ICF`, which `-DEBUG` turns off; Zig 0.16 has
+  no way to pass `/OPT:NOICF`.
+  - Phase: 2+.
+  - Status: dropped from 0.1.0 by James on 2026-10-05. Options: a Zig upgrade that fixes the
+    stripped build (0.17.0 is out, untested here); or unstripped plus a post-link step that
+    sets those 20 bytes from a hash of the rest of the file.
+  - Graded by: CI's smoke run on `windows-11-arm`, once the target is back.
+
 - [ ] **F12. Quality-of-life features** — stackable beams, and the rest, each delivered in
   whichever phase it becomes ready.
   - Phase: 2+.
