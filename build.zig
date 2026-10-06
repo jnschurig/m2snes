@@ -1353,6 +1353,34 @@ pub fn build(b: *std.Build) void {
     b.step("cart-pin", "Run the m2snes binary on the cached crawl for both carts, against pins/cart.txt")
         .dependOn(&cart_pin_run.step);
 
+    // `zig build release-verify -- <vX.Y.Z> | --run <id> | --dir <dir> --commit <rev>`
+    // (release Step 14): a release's downloads against SHA256SUMS, against a
+    // worktree build of its commit, and on the ROM against that commit's pins
+    // (`src/release_verify_main.zig`). Needs the ROM, `gh`, `git`, `tar` and
+    // `unzip`; OrbStack for the Linux binaries on macOS.
+    const release_options = b.addOptions();
+    release_options.addOption([]const []const u8, "release_targets", &release_targets);
+    const release_verify_mod = b.createModule(.{
+        .root_source_file = b.path("src/release_verify_main.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseSafe,
+    });
+    release_verify_mod.addOptions("release_options", release_options);
+    const release_verify_run = b.addRunArtifact(b.addExecutable(.{ .name = "release-verify", .root_module = release_verify_mod }));
+    release_verify_run.setCwd(b.path("."));
+    release_verify_run.has_side_effects = true;
+    release_verify_run.addArg(b.graph.zig_exe);
+    release_verify_run.addArg(rom_path);
+    _ = release_verify_run.addOutputDirectoryArg("release-verify");
+    if (b.args) |args| release_verify_run.addArgs(args);
+    if (rom_check) |c| release_verify_run.step.dependOn(c);
+    b.step("release-verify", "Grade a release's downloads before publishing: -- <vX.Y.Z> | --run <id> | --dir <dir> --commit <rev> [--pins <file>]")
+        .dependOn(&release_verify_run.step);
+    {
+        const t = b.addTest(.{ .name = "release-verify", .root_module = release_verify_mod });
+        test_step.dependOn(&b.addRunArtifact(t).step);
+    }
+
     // The binary on every ROM refusal and on its own input as output. No ROM
     // needed, so it is part of `test`.
     const refusals_run = b.addRunArtifact(pincheck_exe);

@@ -1,0 +1,19 @@
+# The pre-commit hook, for prek or pre-commit: `mise run hooks` installs it,
+# with the pre-push hook beside it (.githooks/pre-push). See README -> Developing.
+#
+# pre-push is not here: the framework skips its pre-push hooks when the push
+# sends no new commits, which is exactly a `v*` tag on `main`, so `pin-check`
+# would never run.
+repos:
+  - repo: local
+    hooks:
+      # Size ceiling, forbidden paths, and the ROM n-gram scan when M2_ROM is
+      # set, over the blobs this commit stages: ROM bytes are refused before
+      # they enter local history.
+      - id: policy
+        name: zig build policy -- --staged
+        entry: zig build policy -- --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

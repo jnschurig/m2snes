@@ -19,6 +19,8 @@ updated:
   - 2026-10-05T21:07:49Z
   - 2026-10-05T21:57:39Z
   - 2026-10-05T23:09:17Z
+  - 2026-10-06T01:17:27Z
+  - 2026-10-06T01:34:17Z
 working_directory: /Users/james/git/m2snes-gh
 ---
 
@@ -673,8 +675,8 @@ Code facts the design rests on (read 2026-10-04):
       `1ca22f4` on `metroid2`: a `MOVED.md` in each directory, and a first line in each single
       file.
 
-- [ ] **Step 13: GitHub Actions CI** (Feature 4; on `dev`, PR to `main`)
-  - [ ] `.github/workflows/ci.yml`, on `push` and `pull_request`, `permissions: contents:
+- [x] **Step 13: GitHub Actions CI** (Feature 4; on `dev`, PR to `main`)
+  - [x] `.github/workflows/ci.yml`, on `push` and `pull_request`, `permissions: contents:
     read`, `concurrency` per ref with cancel-in-progress off for tags, `timeout-minutes` on
     every job. All third-party actions pinned by SHA.
     - `test` (ubuntu-latest): `jdx/mise-action`, `zig build test`, `zig build policy`.
@@ -686,15 +688,60 @@ Code facts the design rests on (read 2026-10-04):
       touches anything outside `.github/`.
     - Confirm Git Bash exists on `windows-11-arm`; if not, that leg runs a `ci/smoke.ps1`
       twin under `pwsh`.
-  - [ ] `.github/dependabot.yml`: `github-actions`, weekly.
-  - [ ] Open the PR `dev` → `main`. Fix until green. Record each job's wall-clock time here.
-  - [ ] Add `test`, `build` and every `smoke` leg as required checks in the `main` ruleset.
-  - [ ] Verify: the PR's checks are green on all five runners. `dependabot-scope`'s
+  - [x] `.github/dependabot.yml`: `github-actions`, weekly.
+  - [x] Open the PR `dev` → `main`. Fix until green. Record each job's wall-clock time here.
+  - [x] Add `test`, `build` and every `smoke` leg as required checks in the `main` ruleset.
+  - [x] Verify: the PR's checks are green on all five runners. `dependabot-scope`'s
     logic is tested on a local diff list (only `.github/` passes; a `src/` path fails).
     **(James)** merge the PR.
+  - **Results 2026-10-05** (PR #1, `dev` at `0b14658`):
+    - `ci.yml`: `test`, `build`, a five-leg `smoke` matrix and `dependabot-scope`. Actions are
+      pinned by SHA: checkout v7.0.1, upload-artifact v7.0.1, download-artifact v8.0.1,
+      mise-action v5.1.1. mise-action adds `--locked` because `mise.lock` is present. Push
+      runs only on branches; tags are left to Step 14's release workflow.
+    - **Found, before CI ran:** `zig build test` in a clean, ROM-free clone was red. blargg's
+      suites (`vendor/testroms`, untracked) were missing. The `test` job now runs
+      `tools/get-testroms.sh`, which is pinned to commit `c240dd7` of `retrio/gb-test-roms`
+      (its `master` since 2015). The fetched bytes equal the local copies.
+    - **Found by CI:** the `aarch64-windows-gnu` binary segfaulted on `--version` on
+      `windows-11-arm`. Bisected on a throwaway `diag/winarm` branch (since deleted). Any
+      `-fstrip` aarch64-windows binary from Zig 0.16 crashes on its first
+      `std.debug.print`, a hello world included. An empty `main`, `-fsingle-threaded`, raw
+      `threadlocal` use and every unstripped build run. Ruled out: stack tracing on or off,
+      unwind tables, frame pointers, optimize mode. Unstripped runs, but 20 bytes (PE
+      timestamp and CodeView GUID, `/Brepro`'s hash of a PDB that holds absolute paths)
+      differ between clone paths.
+      **James: drop Windows arm64 for 0.1.0.** Four targets ship. The `windows-11-arm` leg
+      smoke-tests the x86_64 binary under emulation. Requirements amended, m2snes F15
+      opened. The other four targets stay byte-identical across clone paths.
+    - Git Bash is on `windows-11-arm` (the image lists Bash 5.2 and Git 2.52), so no
+      `smoke.ps1` was needed.
+    - `dependabot-scope` is `ci/dependabot-scope.sh`, reading the PR's files (both sides of a
+      rename) from the API. Tested locally: only `.github/` passed; a `src/` path, a rename
+      out of `src/`, `.githubx/`, an empty list and a `src/` last line with no newline
+      failed (the last one caught a read bug, now fixed).
+    - Wall-clock, run 37395995434: `test` 1126 s (timeout 30 min), `build` 71 s, smoke
+      macos-15 9 s, ubuntu-latest 4 s, ubuntu-24.04-arm 7 s, windows-latest 33 s,
+      windows-11-arm 24 s.
+    - Ruleset `main` (approved by James): `required_status_checks` with the seven above plus
+      `dependabot-scope` (added to the plan's list: it is skipped, so passing, on other PRs,
+      and a Dependabot PR outside `.github/` cannot be merged). Integration 15368 (Actions),
+      non-strict. Read back as set. PR #1 is `CLEAN`/`MERGEABLE`.
+  - **Closed 2026-10-06.** James squash-merged PR #1 as `08d61be` on `main`. GitHub then deleted
+    `dev` (the repo deletes head branches on merge). **James: keep that setting; work goes on a
+    new branch from `main` for each PR.** `dev` is retired: the README's release and
+    Contributing text and `dependabot.yml`'s `target-branch` no longer name it, and Dependabot
+    targets `main`. Step 14 is on `release-workflow`.
 
-- [ ] **Step 14: Release workflow and `release-verify`** (Features 2 and 5)
-  - [ ] `.github/workflows/release.yml`, on `v*` tag push and `workflow_dispatch` (dry
+- [x] **Step 14: Release workflow and `release-verify`** (Features 2 and 5)
+  - [x] (Added 2026-10-06, James) pre-commit as a standard `.pre-commit-config.yaml`, for prek
+    or pre-commit. `.githooks/pre-commit` is gone, and `mise run hooks` unsets
+    `core.hooksPath`, links `.githooks/pre-push` into `.git/hooks`, then runs `prek install`
+    (else `pre-commit install`). pre-push stays native because the framework skips pre-push
+    when no new commits are sent (a tag on `main`). Checked: `pre-commit validate-config`
+    passes. A clean stage passes under both tools, and a staged `fault.sfc` fails under both
+    (exit 1).
+  - [x] `.github/workflows/release.yml`, on `v*` tag push and `workflow_dispatch` (dry
     run):
     - reuses CI's jobs (a reusable workflow `ci.yml` called with `workflow_call`), so the
       release binaries are the ones CI built and smoked;
@@ -708,7 +755,7 @@ Code facts the design rests on (read 2026-10-04):
     - on a tag: `gh release create --draft` with those assets (the only job with
       `contents: write`). On a dry run: uploads the archives and notes as workflow
       artifacts instead.
-  - [ ] `zig build release-verify -- <vX.Y.Z | --run <id>>` (`src/release_verify_main.zig`):
+  - [x] `zig build release-verify -- <vX.Y.Z | --run <id>>` (`src/release_verify_main.zig`):
     - downloads the draft's assets (`gh release download`) or a dry run's artifacts
       (`gh run download`); checks them against `SHA256SUMS`; unpacks;
     - `git worktree add` of the tag's (or run's) commit in a temp dir, `zig build release`
@@ -717,19 +764,62 @@ Code facts the design rests on (read 2026-10-04):
       commit; runs both Linux binaries the same way through `orbctl run` when OrbStack is
       present, else prints `not run:`;
     - prints one summary line (version, commit, carts' SHA-1s, targets run, targets compared).
-  - [ ] `ci/check-version.sh` tested locally: `v0.1.0` passes, `v9.9.9`, `0.1.0` and
+  - [x] `ci/check-version.sh` tested locally: `v0.1.0` passes, `v9.9.9`, `0.1.0` and
     `v0.1.0-x` fail.
-  - [ ] Re-read the README's CI and release sections against what Steps 13–14 built, and
+  - [x] Re-read the README's CI and release sections against what Steps 13–14 built, and
     fix any drift.
-  - [ ] Fault checks: a tampered archive fails the SHA256SUMS check; a binary built
+  - [x] Fault checks: a tampered archive fails the SHA256SUMS check; a binary built
     from a different commit fails the comparison; a wrong pin fails the run.
-  - [ ] Run the dry run on `dev`, then `release-verify --run <id>`. Review the notes
+  - [x] Run the dry run on `release-workflow`, then `release-verify --run <id>`. Review the notes
     together.
-  - [ ] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
-    verify` passed with macOS and both Linux binaries run,.
+  - [x] Verify: the dry run produced four archives, `SHA256SUMS` matches them, `release-
+    verify` passed with macOS and both Linux binaries run.
+
+  - **Results 2026-10-06:**
+    - Archives are `m2snes-<tag>-<target>.tar.gz` (`.zip` for Windows), each holding one
+      directory of that name. `ci/package.sh` builds them, `ci/release-notes.sh` renders
+      `dist/release-notes.md`, and `ci/check-version.sh [--print | <tag>]` checks the tag.
+    - **Changed from the plan:** GitHub only offers `workflow_dispatch` once the file is on
+      the default branch. So `release.yml` also dry-runs on a branch push that changes the
+      release machinery (`release.yml`, `ci.yml`, `ci/`, `dist/`, `build.zig.zon`). Paths
+      are not applied to tags. `ci.yml`'s concurrency group now names the workflow, so a
+      release run never cancels a branch's CI.
+    - `release-verify` also takes `--dir <dir> --commit <rev>` and `--pins <file>`, for the
+      fault checks. It also checks that each archive holds exactly the four files, and that
+      LICENSE, THIRD-PARTY-NOTICES and README.txt equal the commit's. It checks that the notes
+      carry both pins and the commit, and that the host binary's `--version` names both.
+      After a byte mismatch it stops, since the commit's pins no longer speak for the
+      downloads.
+    - OrbStack: James created an arm64 `ubuntu` machine. Rosetta refuses the x86_64 binary
+      (`rosetta error: bss_size overflow`), so (James) `qemu-user` is installed in the
+      machine, and release-verify runs that binary through `orbctl run qemu-x86_64`. It
+      prints `not run:` without qemu.
+    - Local run, `--dir` on a package of `dc73078`: 4 archives ok, 4 binaries
+      byte-identical, notes ok, and macOS, x86_64 Linux (qemu) and arm64 Linux made both
+      pins. Windows compared only. 13 min, mostly qemu.
+    - Fault checks: a byte flipped in an archive fails `SHA256SUMS` and stops. An unlisted
+      archive fails. `--commit HEAD~1` fails all four comparisons (first differing byte
+      named) and runs nothing. A wrong retail pin (`--pins`) fails the notes check and
+      the retail run on all three targets. The worktree-removal bug those runs found
+      is fixed: `std.process.exit` skips `defer`. A failing run now removes the worktree
+      before it exits.
+
+    - Dry run: run 37405020614, from the push of `c61dd5a`. `ci / test` 794 s, `build` 108 s,
+      5 smoke legs 7–27 s, `version` (skipped, says so), `package` 5 s, `draft` skipped. Its
+      `release` artifact: 4 archives, `SHA256SUMS`, `notes.md`. The notes were reviewed by
+      James and stay as they are.
+    - `release-verify -- --run 37405020614`, first run: FAIL on one check. The x86_64 Linux
+      retail run under qemu died partway through the crawl, and the log did not say how it
+      ended. Everything else passed. Two direct qemu runs of the same binary made the pin,
+      with 16 GB free in the VM. So it is 1 failure in 5 x86_64 qemu runs: qemu-user
+      flakiness, not the binary. Not retried automatically. `pin.runBinary` now logs how the
+      process ended (exit code or signal), so a recurrence says more.
+    - Second run: **ok**. `release-verify: ok: m2snes v0.1.0, commit c61dd5a10db9 | retail
+      3452e391… | debug e215c9a5… | ran aarch64-macos, x86_64-linux-musl,
+      aarch64-linux-musl | compared` all four. About 13 min.
 
 - [ ] **Step 15: First release**
-  - [ ] **(James)** Merge `dev` → `main` by PR once its checks are green.
+  - [ ] **(James)** Merge the release branch into `main` by PR once its checks are green.
   - [ ] **(James)** Tag `v0.1.0` on `main` and push it (the pre-push hook runs `pin-check`).
   - [ ] The workflow creates the draft. Run `release-verify -- v0.1.0` and add its summary
     line to the notes.

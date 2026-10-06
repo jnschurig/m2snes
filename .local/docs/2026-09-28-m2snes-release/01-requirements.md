@@ -254,8 +254,11 @@ sequential.
 
 ### 4b. Local hooks
 **Acceptance Criteria:**
-- Tracked hooks in `.githooks/`, enabled with `mise run hooks` (which sets
-  `core.hooksPath`). The README's developer section says to run it once per clone.
+- Tracked hooks, enabled with `mise run hooks`. The README's developer section says to run
+  it once per clone. (2026-10-06, James: pre-commit is a standard `.pre-commit-config.yaml`,
+  for prek or pre-commit. pre-push stays the native `.githooks/pre-push`, linked into
+  `.git/hooks`, because the framework skips pre-push when a push sends no new commits, as a
+  tag on `main` does.)
 - **`pre-commit`**: the policy scan (size ceiling, forbidden paths, ROM n-grams) over the
   staged blobs only, so ROM bytes are refused before they enter local history. Target:
   about a second. With no `M2_ROM` it still runs the ROM-free rules and prints that the
@@ -268,9 +271,9 @@ sequential.
   - On a `v*` tag push it also runs `zig build pin-check`.
   - With no `M2_ROM` set it refuses the push and says why, rather than passing with the
     ROM rungs `not run:` (unset `M2_ROM` silently skips ROM tests).
-- Merges done in GitHub's web UI never pass the hooks. Your own PRs from `dev` are
-  covered, because `dev` was pushed through them. **A PR from anyone else is never merged
-  in the web UI:** it is fetched locally and pushed to `dev` through the hooks first. The
+- Merges done in GitHub's web UI never pass the hooks. Your own PRs are covered, because
+  their branches were pushed through them. **A PR from anyone else is never merged in the
+  web UI:** it is fetched locally and pushed to a branch through the hooks first. The
   README's Contributing section says so.
   - **Exception: Dependabot PRs** may be merged in the web UI when they touch only
     `.github/` (CI fails one that touches anything else); action pins carry no ROM data.
@@ -390,7 +393,8 @@ memories it needs without snes_game_dev.
 - ROM-data rule: nothing ROM-derived tracked, released, cached, uploaded, or printed in a
   CI log.
 - Work in `~/git/m2snes` stays on `remote-init` until the fresh start. After it, my
-  commits go on a `dev` branch of `~/git/m2snes-gh`, and James merges `dev` → `main` by PR.
+  commits go on a branch of `~/git/m2snes-gh`, one per PR, and James merges it into `main`
+  (2026-10-06: a new branch from `main` for each PR; GitHub deletes it on merge).
 - Release grading depends on James running `release-verify` locally (needs the ROM).
 
 ## Decisions (James, 2026-10-04)

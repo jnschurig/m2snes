@@ -28,5 +28,11 @@ description = "The gate: unit tests, tracked-file policy, and the ROM-dependent 
 run = "zig build verify"
 
 [tasks.hooks]
-description = "Use the tracked git hooks in .githooks/ (once per clone): the policy before each commit, the audit and the gate before each push"
-run = "git config core.hooksPath .githooks"
+description = "Install the git hooks (once per clone; needs prek or pre-commit): the policy before each commit (.pre-commit-config.yaml), the audit and the gate before each push (.githooks/pre-push)"
+# pre-commit refuses to install while core.hooksPath is set (older clones set it).
+run = '''
+set -eu
+git config --unset core.hooksPath || true
+ln -sf "$(git rev-parse --show-toplevel)/.githooks/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
+if command -v prek >/dev/null; then prek install; else pre-commit install; fi
+'''

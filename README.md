@@ -27,7 +27,9 @@ for your machine:
 | Linux, arm64 | `aarch64-linux-musl` (`.tar.gz`) |
 | Windows, x86_64 or arm64 | `x86_64-windows-gnu` (`.zip`) |
 
-Windows on ARM runs the x86_64 build under emulation. Intel Macs are not supported. The Linux builds are static and run on any distribution.
+Windows on ARM runs the x86_64 build under emulation, with native Windows ARM coming
+eventually. Intel Macs are not supported. The Linux builds are static and run on any
+distribution.
 To check the download, compare its SHA-256 with the release's `SHA256SUMS`
 (`shasum -a 256 <archive>` on macOS, `sha256sum` on Linux,
 `certutil -hashfile <archive> SHA256` on Windows).
@@ -97,8 +99,12 @@ platform. Install [mise](https://mise.jdx.dev), then in your clone:
 
 ```sh
 mise trust && mise install
-mise run hooks          # once per clone: use the tracked git hooks in .githooks/
+mise run hooks          # once per clone: install the git hooks
 ```
+
+`mise run hooks` needs [prek](https://github.com/j178/prek) or
+[pre-commit](https://pre-commit.com) on `PATH`. It installs the pre-commit hook from
+`.pre-commit-config.yaml` and links the pre-push hook from `.githooks/pre-push`.
 
 Most checks need your ROM. Put it at `./metroid2.gb`, or set `M2_ROM` to its path.
 The emulator rungs also need [Mesen2](https://www.mesen.ca), found through `MESEN`.
@@ -107,13 +113,13 @@ The emulator rungs also need [Mesen2](https://www.mesen.ca), found through `MESE
 ### The gate
 
 | Command | Needs the ROM | What it is |
-|---|---|---|
-| `zig build test` | no | Unit tests. It skips those that need the ROM. |
-| `zig build policy` | no | The tracked-file policy: size ceiling, forbidden paths, and the ROM n-gram scan when `M2_ROM` is set. |
-| `zig build test-rom` | yes | Unit tests, failing without the ROM. |
-| `zig build verify` | yes | The gate: every rung, against our own Game Boy emulator running your ROM. About 14 minutes. |
+| ------- | ------------- | ---------- |
+| `zig build test`        | no  | Unit tests. It skips those that need the ROM. |
+| `zig build policy`      | no  | The tracked-file policy: size ceiling, forbidden paths, and the ROM n-gram scan when `M2_ROM` is set. |
+| `zig build test-rom`    | yes | Unit tests, failing without the ROM. |
+| `zig build verify`      | yes | The gate: every rung, against our own Game Boy emulator running your ROM. About 14 minutes. |
 | `zig build verify-full` | yes | The gate, then the slow tier: the 100% recording's worlds and the credits. |
-| `zig build pin-check` | yes | Both carts from the `m2snes` binary, run as a player runs it (no crawl cache), against `pins/cart.txt`. `-Dtarget=aarch64-macos` grades the exact binary `release` ships. |
+| `zig build pin-check`   | yes | Both carts from the `m2snes` binary, run as a player runs it (no crawl cache), against `pins/cart.txt`. `-Dtarget=aarch64-macos` grades the exact binary `release` ships. |
 
 The carts' SHA-1s are pinned in `pins/cart.txt`. A change that changes the output on
 purpose re-pins with `zig build repin -- "<why>"`. That logs the old pin, the new pin
@@ -131,15 +137,6 @@ every rung, what it compares against, and the fault that shows it is not vacuous
 
 `zig build verify` is too slow for every push. Run it yourself before you open a PR.
 
-### CI
-
-GitHub Actions runs on every push and pull request, **without the ROM**. The ROM cannot
-be distributed, so the repository has no secrets and a runner has nothing to fetch it
-with. CI runs `zig build test` and `zig build policy`, builds the release binaries
-for all four targets, and smoke-tests each one natively (`ci/smoke.sh`). The smoke test
-runs outside any checkout, with no Zig on `PATH`, and checks that a file of zeros is
-refused. CI does not replace `verify`.
-
 ### Releasing
 
 `zig build release` cross-compiles `m2snes` (ReleaseSafe, stripped) for the four
@@ -150,15 +147,23 @@ commit gives the same bytes on any machine, from any checkout path.
 
 To cut a release:
 
-1. Set the version in `build.zig.zon`, on `dev`, and merge `dev` into `main` by PR.
+1. Set the version in `build.zig.zon` on a branch, and merge it into `main` by PR.
 2. Tag `main` with `vX.Y.Z` and push the tag. The pre-push hook runs `pin-check`.
 3. The release workflow checks that the tag matches `build.zig.zon`, packages the
    binaries CI built and smoke-tested, writes `SHA256SUMS` and the notes, and creates a
    **draft** release.
 4. `zig build release-verify -- vX.Y.Z` downloads the draft and checks it against
-   `SHA256SUMS`. It rebuilds the binaries from the tag and compares them byte for byte,
-   then runs the host's binary (and the Linux ones, under OrbStack) on the ROM against
-   the pins. Add its summary line to the notes, then publish.
+   `SHA256SUMS`. It rebuilds the binaries from the tag in a temporary worktree and
+   compares them byte for byte, then runs the host's binary on the ROM against the pins
+   at the tag. On macOS it runs the Linux ones too, in an OrbStack machine (the other
+   architecture's through `qemu-user`, installed in it). Add its summary line to the
+   notes, then publish.
+
+Running the release workflow by hand (Actions → release → Run workflow) is a dry run:
+no version check and no release, and the archives and notes are the run's `release`
+artifact. A push to a branch that changes the release machinery (`release.yml`,
+`ci.yml`, `ci/`, `dist/`, `build.zig.zon`) is a dry run too.
+`zig build release-verify -- --run <id>` grades it.
 
 A broken release is fixed forward: bump the version and release again.
 
@@ -193,31 +198,12 @@ them.
 
 ### Contributing
 
-Pull requests are welcome. Because the hooks are what keep ROM data out of this
-repository, and a merge in GitHub's web UI bypasses them:
+Pull requests are welcome.
 
-- An outside PR is never merged in the web UI. It is fetched locally and pushed to `dev`
-  through the hooks, then merged into `main` from there.
-- A Dependabot PR that touches only `.github/` may be merged in the web UI. CI fails one
-  that touches anything else.
-- GitHub's web file editor is not used on this repository.
-
-Never commit a ROM, a cart, a save file, or bytes copied out of any of them.
-
-## Status
-
-**1.0, the complete game: built, graded, and accepted on hardware (2026-10-03).**
-Title, landing site, all 47 Metroids, Arachnus, the Queen, the baby, the ending and the
-credits are ported from the disassembly, branch for branch. Every enemy AI the ROM's
-spawn records reach, every item and beam, all seven map banks, the save stations and
-the soft reset are in. The sound engine is bank 4 on the SPC700 over the GB-APU shim,
-graded write for write against the Game Boy.
-
-The cycle closed when a retail-built cart was played from new game to credits on an
-FXPak Pro, with every defect found there fixed or explicitly accepted.
-[docs/feature_tracker.md](docs/feature_tracker.md) has the features and the defects
-still open against them. [docs/history.md](docs/history.md) is the account of how the
-port and its grading machinery were built.
+- The repository has strict pre-commit and pre-push rules, so all pull requests
+  must come from a local change. Be sure to have a pre-commit tool installed.
+- Never commit a ROM, a cart, a save file, or bytes copied out of any of them.
+- Feel free to raise an issue or start a conversation.
 
 ## Sources
 
@@ -229,16 +215,6 @@ port and its grading machinery were built.
 - **[Vashy777/metroid2](https://github.com/Vashy777/metroid2)**, an MIT-licensed
   `mgbdis` dump, is used for the routine inventory behind the logic ledger. `mgbdis` on
   your own ROM reproduces it.
-
-Neither is vendored. [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) lists what the binary
-carries from others and what is used only during development.
-
-## Legal
-
-Nintendo DMCA'd AM2R, a Metroid II remake, in 2016. AM2R distributed assets. The
-bring-your-own-ROM model distributes none, which is a stronger position, and the same
-one M2RoS, sm64ex and the N64Recomp projects take. Metroid II is still among the
-highest-risk properties in this space. This is an accepted, deliberate risk.
 
 ## License
 
