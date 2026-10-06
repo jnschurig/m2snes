@@ -9,8 +9,8 @@
 #   {{history}}   the pins/history.md lines added since the previous v* tag
 #                 reachable from HEAD; nothing when there is none (the first
 #                 release)
-#   {{verified}}  a placeholder for release-verify's summary line, which
-#                 James adds before publishing
+#   {{verified}}  a placeholder for release-verify's summary line, added
+#                 once it has graded the published release
 #
 # Needs the tags and full history (actions/checkout fetch-depth: 0).
 set -eu
@@ -50,7 +50,7 @@ $0 == "{{history}}" {
 	if (empty) skip_blank = 1
 	next
 }
-$0 == "{{verified}}" { print "_release-verify: (its summary line goes here before publishing)_"; next }
+$0 == "{{verified}}" { print "_`zig build release-verify` grades this release on the ROM after it is published; its summary line goes here._"; next }
 skip_blank && $0 == "" { skip_blank = 0; next }
 {
 	skip_blank = 0

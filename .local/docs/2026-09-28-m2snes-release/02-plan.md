@@ -21,6 +21,7 @@ updated:
   - 2026-10-05T23:09:17Z
   - 2026-10-06T01:17:27Z
   - 2026-10-06T01:34:17Z
+  - 2026-10-06T04:22:45Z
 working_directory: /Users/james/git/m2snes-gh
 ---
 
@@ -820,12 +821,12 @@ Code facts the design rests on (read 2026-10-04):
 
 - [ ] **Step 15: First release**
   - [ ] **(James)** Merge the release branch into `main` by PR once its checks are green.
-  - [ ] **(James)** Tag `v0.1.0` on `main` and push it (the pre-push hook runs `pin-check`).
-  - [ ] The workflow creates the draft. Run `release-verify -- v0.1.0` and add its summary
-    line to the notes.
-  - [ ] **(James)** Publish the draft.
-  - If anything is wrong with the draft or the release: fix it on `dev`, bump the version
-    (`0.1.1`), delete the bad tag and draft, and repeat from the merge.
+  - [ ] **(James)** Tag `v0.1.1` on `main`, from a checkout of `main`, and push it (the
+    pre-push hook runs `pin-check`).
+  - [ ] The workflow publishes the release with its assets. Run `release-verify -- v0.1.1`
+    and add its summary line to the notes (`gh release edit --notes-file`).
+  - If anything is wrong with the release: fix it on a branch, bump the version, delete the
+    bad tag and release, and repeat from the merge.
   - [ ] Verify: logged out, each archive downloads; the downloaded Linux x86_64 binary
     (through OrbStack) and macOS binary produce the pinned retail SHA-1.
   - **v0.1.0 withdrawn, 2026-10-06.** `v0.1.0` was tagged on `c61dd5a`, a
@@ -836,4 +837,9 @@ Code facts the design rests on (read 2026-10-04):
     on `release-0.1.1`. The version is only in `--version`, so the pins do not move. Tag `main`
     after the squash merge, from a checkout of `main` (the pre-push hook needs the tag at
     `HEAD`), and publish the workflow's draft rather than making a release.
+  - **A tag publishes, 2026-10-06 (James).** No draft: `release.yml`'s last job (`release`,
+    was `draft`) runs `gh release create` without `--draft`, so the tag push publishes the
+    release with its assets. `release-verify` grades it afterwards, and a failure is fixed
+    forward. The notes' placeholder, the README, and Features 2 and 5 in the requirements
+    are amended to match. These changes are on `release-0.1.1` (PR #3).
   - [ ] **(James)** Archive the GitLab project (`jankotron-group/m2snes`), private.
