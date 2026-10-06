@@ -828,4 +828,12 @@ Code facts the design rests on (read 2026-10-04):
     (`0.1.1`), delete the bad tag and draft, and repeat from the merge.
   - [ ] Verify: logged out, each archive downloads; the downloaded Linux x86_64 binary
     (through OrbStack) and macOS binary produce the pinned retail SHA-1.
+  - **v0.1.0 withdrawn, 2026-10-06.** `v0.1.0` was tagged on `c61dd5a`, a
+    `release-workflow` commit, not on `main`: PR #2 was squash-merged as `689eb7f`. Its
+    workflow run, 37409335593, made the right draft (4 archives + `SHA256SUMS`). But a second
+    release was created by hand in the web UI and published, with no assets. **James: fix
+    forward as v0.1.1.** Both v0.1.0 releases were deleted, and `build.zig.zon` went to 0.1.1
+    on `release-0.1.1`. The version is only in `--version`, so the pins do not move. Tag `main`
+    after the squash merge, from a checkout of `main` (the pre-push hook needs the tag at
+    `HEAD`), and publish the workflow's draft rather than making a release.
   - [ ] **(James)** Archive the GitLab project (`jankotron-group/m2snes`), private.
