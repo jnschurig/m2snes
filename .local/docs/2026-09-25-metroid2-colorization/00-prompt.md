@@ -1,12 +1,19 @@
 # Metroid II SNES port: colorization
 
-Colorize the m2snes port (`~/git/m2snes`). Phase 1 reproduces EJRTQ's Game Boy
-Color colorization (romhacking.net hack 4388). Later phases replace its colours,
-which James does not like, working toward a Samus Returns (3DS) look.
+Colorize the m2snes port (`~/git/m2snes`). Phase 0 gives each layer its own
+fixed colours, the way a Game Boy Color colours an original Game Boy game.
+Phase 1 reproduces EJRTQ's Game Boy Color colorization (romhacking.net hack
+4388). Later phases replace its colours, which James does not like, working
+toward a Samus Returns (3DS) look.
 
 ## Goals
 
-1. **Phase 1 (this cycle): EJRTQ parity.** Every screen shows EJRTQ's GBC
+0. **Phase 0 (first): GBC compatibility colours.** The background, window
+   (HUD), OBP0 and OBP1 each get their own 4-colour palette, starting from
+   the palettes the GBC boot ROM picks for Metroid II (see "Phase 0" below).
+   James's target look is a screenshot of the GBC's own colours: blue and
+   white rock, a yellow and red Samus, and a white HUD with black text.
+1. **Phase 1: EJRTQ parity.** Every screen shows EJRTQ's GBC
    colours, graded against the patched ROM running in SameBoy in CGB mode.
 2. **Built for recolouring.** Colour values are kept apart from the
    tile/sprite-to-palette assignment. A recolour is a data swap with no engine
@@ -15,7 +22,51 @@ which James does not like, working toward a Samus Returns (3DS) look.
    palettes per area; enemies with 4-8 colours; a non-black background colour
    on some screens.
 
-## Current state (verified 2026-09-25)
+## Phase 0: GBC compatibility palettes (found 2026-10-07)
+
+- **Source:** the CGB boot ROM's title-checksum table
+  (`vendor/sameboy/BootROMs/cgb_boot.asm`, `TitleChecksums` →
+  `PalettePerChecksum` → `PaletteCombinations` → `Palettes`). `METROID2`
+  sums to `$46`, which appears twice in the table. The 4th letter `R` picks
+  the `???[R]????????` entry: palette index 46, `palette_comb 25, 3, 28`
+  (Obj0, Obj1, Bg).
+- **The colours** (BGR555, shade 0 first):
+
+  | Layer | Boot ROM palette | Colours |
+  |---|---|---|
+  | BG (the GBC's window uses it too) | 28 | `$7FFF $7E8C $7C00 $0000` white, light blue, blue, black |
+  | OBP0 | 25 | `$03FF $001F $000C $0000` yellow, red, dark red, black |
+  | OBP1 | 3 | `$7FFF $1BEF $0200 $0000` white, green, dark green, black |
+
+- **Same mechanism as the port's greys.** In DMG-compatibility mode the GBC
+  uses each `BGP`/`OBPn` shade to pick one of the four colours. The port's
+  `snes_screen.palette(bgp)` already maps each shade through `grey(shade)`
+  (`src/snes_screen.zig:611`). Phase 0 replaces `grey` with one colour table
+  per layer, and the colour values live in those tables alone (Goal 2).
+- **The window gets its own palette, which the GBC cannot do.** On the GBC
+  the window shares the background's palette. Here the HUD is BG2, and its
+  map words use palette 0, so it shares CGRAM `$00-$03` with BG3
+  (`engine/main.asm` "One window tile id as a BG2 tilemap word"). Point it at
+  BG2 palette 1 (CGRAM `$10-$1F`, free) so it can differ. It defaults to BG
+  palette 28, which matches the target screenshot.
+- **The oracle:** SameBoy in CGB mode, running the plain ROM through its own
+  boot ROM, picks this palette by itself. Read its palette RAM and compare it
+  with the cart's CGRAM. The current greys must fail that check.
+- **What changes on screen:** everything drawn with OBP1 turns green, as on a
+  real GBC: Samus's acid and damage flash, frozen enemies, the stunned flash
+  and blinking drops. The backdrop and letterbox stay black, because the
+  play-field `BGP` maps index 0 to black. Check the title, credits and any
+  other `BGP` value too.
+- **Gate impact:** about 11 callers of `grey`/`palette` in `snes_screen.zig`,
+  plus the test "the palette is four greys with the backdrop shade first"
+  (`snes_screen.zig`) and `snes boot` code 15 (which reads `$90`). Any grader
+  that compares RGB against grey Game Boy renders should compare shade
+  numbers instead, so it survives every later recolour.
+- **Colour correction:** copy the values raw (CGRAM uses the same BGR555
+  format). SameBoy may display them colour-corrected, so judge the look on
+  the FXPak.
+
+## Current state (verified 2026-09-25; line numbers have moved since)
 
 - **BG mode 1** (`engine/main.asm:114`, `!MODE = $01`).
   - BG3 (2bpp) is the play field.
@@ -74,9 +125,21 @@ which James does not like, working toward a Samus Returns (3DS) look.
 - Derive facts from the patched ROM itself (disassemble what reads the palette
   tables); don't infer them from side effects.
 - Playtest asks must name a visible symptom that could fail.
-- Commit to the existing branch (`remote-init`), never main.
+- Each PR gets a new branch from main, never main itself (see memory "Work on
+  a branch, PR to main").
 
 ## Open questions for requirements
+
+Phase 0:
+
+- Is Phase 0 its own PR before Phase 1 starts? (Recommended: yes.)
+- Should the window default to the BG palette (as on the GBC) or get distinct
+  colours from the start?
+- Is OBP1 turning green acceptable, or should it get a different default?
+- Do the title, credits and cutscenes use other `BGP`/`OBP` values, and do
+  they look right through the same tables?
+
+Phase 1:
 
 - How EJRTQ stores and selects palettes (tables, per-room loads, per-enemy
   OBJ palettes), and how many distinct palettes a single screen needs at once.
