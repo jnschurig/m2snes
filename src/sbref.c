@@ -139,3 +139,62 @@ void sbref_mute(sbref_t *self, unsigned channel, bool muted)
 {
     GB_set_channel_muted(&self->gb, (GB_channel_t)channel, muted);
 }
+
+// The core's debugger narrates to stdout ("Program is running, ..."), which
+// would land among the gate's rung lines.
+static void on_log(GB_gameboy_t *gb, const char *string, GB_log_attributes_t attributes)
+{
+    (void)gb;
+    (void)string;
+    (void)attributes;
+}
+
+// The palettes a Game Boy Color picks for a DMG cartridge.
+//
+// The colour-scheme oracle (gbc-color-option F4): boot `rom` on a CGB with
+// `boot` mapped -- SameBoy's own `cgb_boot.bin`, assembled from source, never
+// Nintendo's -- run until the boot ROM unmaps itself, and copy out BG and OBJ
+// palette RAM as 32 little-endian BGR555 words each. In compatibility mode the
+// game cannot write palette RAM, so what the boot ROM leaves there is what the
+// whole game is drawn in.
+//
+// A separate machine from `sbref_t`'s: that one never loads a cartridge and
+// never runs its CPU. Returns false if the boot ROM had not handed over within
+// `max_frames` frames, which would mean it rejected the cartridge or hung.
+bool sbref_cgb_palettes(const uint8_t *rom, size_t rom_len,
+                        const uint8_t *boot, size_t boot_len,
+                        unsigned max_frames,
+                        uint16_t bg_out[32], uint16_t obj_out[32])
+{
+    sbref_t *self = calloc(1, sizeof(sbref_t));
+    if (!self) return false;
+    GB_init(&self->gb, GB_MODEL_CGB_E);
+    GB_set_log_callback(&self->gb, on_log);
+    GB_set_pixels_output(&self->gb, self->screen);
+    GB_set_rgb_encode_callback(&self->gb, rgb_encode);
+    GB_set_turbo_mode(&self->gb, true, true);
+    GB_load_boot_rom_from_buffer(&self->gb, boot, boot_len);
+    GB_load_rom_from_buffer(&self->gb, rom, rom_len);
+    GB_reset(&self->gb);
+
+    // `GB_run` returns 8 MHz ticks; a DMG frame is 70224 4 MHz cycles.
+    uint64_t budget = (uint64_t)max_frames * 70224 * 2;
+    uint64_t ran = 0;
+    while (!self->gb.boot_rom_finished && ran < budget) {
+        ran += GB_run(&self->gb);
+    }
+    bool ok = self->gb.boot_rom_finished;
+    if (ok) {
+        size_t size;
+        uint16_t bank;
+        const uint8_t *bg = GB_get_direct_access(&self->gb, GB_DIRECT_ACCESS_BGP, &size, &bank);
+        const uint8_t *obj = GB_get_direct_access(&self->gb, GB_DIRECT_ACCESS_OBP, &size, &bank);
+        for (unsigned i = 0; i < 32; i++) {
+            bg_out[i] = (uint16_t)(bg[i * 2] | (bg[i * 2 + 1] << 8));
+            obj_out[i] = (uint16_t)(obj[i * 2] | (obj[i * 2 + 1] << 8));
+        }
+    }
+    GB_free(&self->gb);
+    free(self);
+    return ok;
+}

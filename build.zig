@@ -195,7 +195,7 @@ pub fn build(b: *std.Build) void {
         "src/snes_target.zig", "src/snes_chr.zig", "src/snes_convert.zig",
         "src/snes_layout.zig", "src/snes_screen.zig", "src/snes_render.zig",
         "src/snes_inject.zig", "src/inspect.zig", "src/title_super.zig",
-        "src/gfx_info.zig", "src/colors.zig",
+        "src/gfx_info.zig", "src/colors.zig", "src/gbc_oracle.zig",
     };
     var snes_mods: [snes_files.len]*std.Build.Module = undefined;
     for (snes_files, 0..) |f, i| {
@@ -1625,6 +1625,11 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
         "-DGB_COPYRIGHT_YEAR=\"2025\"",
     };
     mod.addCSourceFile(.{ .file = b.path("src/sbref.c"), .flags = &flags });
+    // The core as SameBoy builds it: without UBSan, which Zig turns on for C in
+    // Debug. Its CPU shifts negative values left (`sub_a_d8`'s `(a - value) <<
+    // 8`), which traps the moment a cartridge runs; the APU-only path never ran
+    // the CPU, so it went unseen until the CGB palette oracle booted a ROM.
+    const core_flags = flags ++ [_][]const u8{"-fno-sanitize=undefined"};
     mod.addCSourceFiles(.{
         .root = b.path(root),
         // Every C file in the core at the pinned tag. The whole thing rather
@@ -1644,7 +1649,7 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
             "Core/symbol_hash.c",  "Core/timing.c",
             "Core/workboy.c",
         },
-        .flags = &flags,
+        .flags = &core_flags,
     });
 }
 

@@ -72,6 +72,13 @@ than report a green that graded nothing; plain `zig build test` skips the ROM te
   `verify-full` log had lost its `pin-check` and `crawl cold` lines. All 33 now use
   `writerStreaming`. `smoke.sh` checks that `--version >> log` keeps the log's lines; the old
   binary failed that.
+- **The fiftieth rung is `gbc palettes`, added 2026-10-14 by gbc-color-option Step 2.**
+  SameBoy's CGB model boots the plain ROM with its own `cgb_boot.bin` (assembled from source
+  under `vendor/`) and runs until the boot ROM hands over (`sbref_cgb_palettes`). Its BG
+  palette 0 and OBJ palettes 0 and 1 must equal the `gbc` scheme's `bg`, `obp0` and `obp1`
+  tables (`src/colors.zig`, graded by `src/gbc_oracle.zig`), so the colours are graded against
+  a Game Boy Color and not against our own copy of them. Fault: `mono`'s tables fail it, every
+  run. It needs the ROM and `vendor/sameboy`, and says `not run:` without them.
 - **The forty-eighth and forty-ninth rungs are `builder` and `pin (binary)`, and
   `verify-full`'s sixth is `pin-check`, added 2026-10-05 by release Step 6.** The carts are
   now the `m2snes` binary's: `zig build rom` and the build's cart runs call it with
@@ -344,6 +351,7 @@ this table exists to make visible.
 | dispatch survey | 7 dispatch sites, 223 table entries | the ROM | floors |
 | tas horizon (×2) | our GB replay stays faithful to the published runs: 8407 / 4566 | the published TASes | floors |
 | sameboy | 10 captures match a second GB emulator | SameBoy | pixel compare |
+| gbc palettes | the `gbc` scheme's BG, OBJ0 and OBJ1 tables are the palettes a Game Boy Color picks for Metroid II | SameBoy's CGB model and boot ROM | **`mono`'s tables fail it, every run** |
 | snes layout | 266 KiB converted fits 376 KiB reserved | the region map | headroom |
 | snes render | 904 screens convert pixel for pixel | the GB render | **4/4 injected faults caught** |
 | snes engine | 32 KiB image in 128 KiB, and it is what `main.asm` assembles to | `engine/main.asm` | reassembly compare |

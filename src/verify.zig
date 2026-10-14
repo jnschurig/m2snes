@@ -49,6 +49,10 @@ const audio_level = @import("audio_level.zig");
 // Only a gate built with `vendor/sameboy` present links the renderer; without
 // it the rung says it did not run, and nothing here refers to the import.
 const audio_level_run = if (build_options.have_sameboy) @import("audio_level_run.zig") else struct {};
+const colors = @import("colors.zig");
+const gbc_oracle = @import("gbc_oracle.zig");
+// Likewise: only a gate that links SameBoy can boot its CGB model.
+const gbc_oracle_run = if (build_options.have_sameboy) @import("gbc_oracle_run.zig") else struct {};
 
 
 const build_options = @import("build_options");
@@ -57,7 +61,7 @@ const build_options = @import("build_options");
 /// rather than counted: the gate prints a rung per mechanism and some print two
 /// lines, so a count taken from the output would drift against the document
 /// this number exists to send the reader to.
-const rung_count: usize = 49;
+const rung_count: usize = 50;
 
 pub fn main(init: std.process.Init) !void {
     var arena_state = std.heap.ArenaAllocator.init(init.gpa);
@@ -854,6 +858,39 @@ pub fn main(init: std.process.Init) !void {
                 _ = try audio_level_run.report(out, &ms, "        ");
             }
         }
+    }
+
+    // ---- ROM-dependent: are the gbc colours a Game Boy Color's? -----------
+    //
+    // gbc-color-option F4. SameBoy's CGB model boots the plain ROM with its own
+    // boot ROM, and the palettes it leaves are what a Game Boy Color draws the
+    // game in. The `gbc` scheme's tables must be those, and `mono`'s must not.
+    if (rom_bytes) |bytes| blk: {
+        if (comptime !build_options.have_sameboy) {
+            try out.print("      gbc palettes      not run: no SameBoy at vendor/sameboy (tools/sameboy-frames.sh)\n", .{});
+            break :blk;
+        } else {
+            const boot = std.Io.Dir.cwd().readFileAlloc(init.io, gbc_oracle.boot_path, arena, .limited(1 << 12)) catch {
+                try out.print("      gbc palettes      not run: no {s} (tools/sameboy-frames.sh)\n", .{gbc_oracle.boot_path});
+                break :blk;
+            };
+            const p = gbc_oracle_run.run(bytes, boot) catch |e| {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     {s}\n", .{@errorName(e)});
+                break :blk;
+            };
+            if (gbc_oracle.grade(.gbc, p.bg, p.obj)) |m| {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     {s}: SameBoy {any}, scheme {any}\n", .{ m.layer, m.got, m.want });
+            } else if (gbc_oracle.grade(.mono, p.bg, p.obj) == null) {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     fault check: mono's tables passed too\n", .{});
+            } else {
+                try out.print("ok    gbc palettes      SameBoy's CGB boot ROM picks the gbc scheme's BG, OBJ0 and OBJ1 tables; mono's fail\n", .{});
+            }
+        }
+    } else {
+        try out.print("      gbc palettes      not run: no ROM configured (set M2_ROM; see docs/setup.md)\n", .{});
     }
 
     // ---- ROM-dependent: does the whole thing build, the same way twice? ----
