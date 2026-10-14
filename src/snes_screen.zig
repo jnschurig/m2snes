@@ -36,6 +36,7 @@ const screens = @import("screens.zig");
 const warp = @import("warp.zig");
 const save = @import("save.zig");
 const offsets = @import("offsets.zig");
+const colors = @import("colors.zig");
 
 // ---- Screen body to tilemap ------------------------------------------------
 
@@ -606,18 +607,6 @@ pub fn scrollY(camera_y: u16) u16 {
 
 // ---- Palette ---------------------------------------------------------------
 
-/// A DMG shade as a 15-bit SNES colour. Four evenly spaced greys, lightest
-/// first, which is the order `BGP` numbers them in.
-pub fn grey(shade: u2) u16 {
-    const level: u16 = switch (shade) {
-        0 => 31,
-        1 => 21,
-        2 => 10,
-        3 => 0,
-    };
-    return level | (level << 5) | (level << 10);
-}
-
 /// BG3's palette 0, as four CGRAM words.
 ///
 /// Entry 0 is the backdrop as well as the play field's colour 0, and that is
@@ -625,10 +614,10 @@ pub fn grey(shade: u2) u16 {
 /// out right. A Game Boy background pixel of index 0 is opaque and drawn with
 /// `BGP`'s first field; a SNES background pixel of colour 0 shows the backdrop.
 /// Writing the same colour into both means the two agree.
+///
+/// The colours are the `mono` scheme's play-field table (`colors.zig`).
 pub fn palette(bgp: u8) [4]u16 {
-    var out: [4]u16 = undefined;
-    for (0..4) |i| out[i] = grey(@intCast((bgp >> @intCast(i * 2)) & 3));
-    return out;
+    return colors.apply(colors.tables(.mono).bg, bgp);
 }
 
 // ---- Which screen the cart boots on ----------------------------------------

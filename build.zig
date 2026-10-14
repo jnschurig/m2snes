@@ -195,7 +195,7 @@ pub fn build(b: *std.Build) void {
         "src/snes_target.zig", "src/snes_chr.zig", "src/snes_convert.zig",
         "src/snes_layout.zig", "src/snes_screen.zig", "src/snes_render.zig",
         "src/snes_inject.zig", "src/inspect.zig", "src/title_super.zig",
-        "src/gfx_info.zig",
+        "src/gfx_info.zig", "src/colors.zig",
     };
     var snes_mods: [snes_files.len]*std.Build.Module = undefined;
     for (snes_files, 0..) |f, i| {

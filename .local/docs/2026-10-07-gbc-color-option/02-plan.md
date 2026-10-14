@@ -1,0 +1,255 @@
+---
+created: 2026-10-08T20:40:00Z
+updated:
+  - 2026-10-08T20:40:00Z
+  - 2026-10-12T01:38:51Z
+  - 2026-10-12T02:29:18Z
+  - 2026-10-14T14:59:17Z
+working_directory: /Users/james/git/m2snes
+---
+
+# Implementation Plan
+
+## Status: Final
+
+## Overview
+
+The colour values live in one Zig module (`src/colors.zig`). The builder
+patches every scheme's CGRAM words into a table in the cart, the same way
+`BootPalette` is patched today. The engine keeps the active scheme in WRAM
+and loads it at reset, on the title, and from NMI when L or the slot changes.
+Steps are ordered so the gate stays green throughout:
+- the HUD moves to its own palette slot while everything is still grey;
+- the graders learn to read colour before the cart shows any;
+- the default flips to `gbc` only after both.
+
+SRAM, the L handling and the badge come last.
+
+**What the code says (found in design):**
+- CGRAM is written in three places: `LoadPalette`, called once from `Reset`;
+  `UploadTitleArt` (palette 7); and `Fatal`. (`ClearVideoMemory` also zeroes
+  it at reset, before `LoadPalette`.) Game over reaches the title
+  through `Reboot` → `Reset`, which clears WRAM, so the title re-reads SRAM
+  every time. Debug warps don't reset, so the scheme in WRAM survives them.
+  The credits write no CGRAM.
+- The HUD's BG2 map words are written with a zero high byte (palette 0) in
+  these places:
+  - `HudPut` / `LoadHud`, which carry the base row, the save text and the
+    bar;
+  - `ItemNameUpload`;
+  - `UpdateStatusBar` (the digits);
+  - `HudBaseNmi`;
+  - `QueenDrawHead`;
+  - `ClearWindowMap`;
+  - on the Zig side, `snes_target.windowWord` and `windowIdFromWord`.
+- Six copies of Lua `shade(px)` classify by red channel thresholds
+  (`snes_romtest` ×2, `warp_grade` ×2, `queen_oracle`, and more). Under
+  `gbc`, `$7E8C` has red 99, so it would read as shade 2, not 1. They have
+  to change before the default flips.
+- SRAM mirrors the Game Boy's layout: slots `$000-$0BF`, the counter at
+  `$0C0`, credits text from `$0800`, spawn flags `$1000-$15FF`. Free space:
+  `$0C1-$07FF` and `$1600-$1FFF`.
+- "Slot holds a saved file" is the game's own (broken) magic walk in
+  `TitleStart`. The scheme logic uses the same walk, so it always agrees with
+  what Start will do.
+- The full SameBoy core is already linked into `verify` when
+  `vendor/sameboy` is present (`addSameBoyApu`, `src/sbref.c`), and
+  `vendor/sameboy/build/bin/tester/cgb_boot.bin` exists.
+
+**Grading (F5, as amended):** graders map colour → shade through one map
+per scheme, built from all of its layers. The Step 1 uniqueness test is the
+tripwire for `full`.
+
+## Steps
+
+- [x] **Step 1: Branch, and the scheme data in Zig**
+  - [x] `git switch -c color-schemes` from up-to-date main, carrying the
+        `.local` changes. Leave `mise.lock` alone; it isn't ours.
+  - [x] New `src/colors.zig`:
+    - `Scheme` enum with stable ids: `mono = 0`, `gbc = 1`. The ids are what
+      SRAM stores, so they never change meaning.
+    - `default_scheme = .gbc`.
+    - Per scheme, four tables of four colours each (`bg`, `window`, `obp0`,
+      `obp1`).
+    - `cgramWords(scheme) [16]u16`, which applies `screens.live_bgp/obp0/obp1`
+      as `snes_screen.palette` does.
+    - The `gbc` tables cite `cgb_boot.asm`'s `Palettes` 28/25/3 and
+      combination 46.
+  - [x] Make `snes_screen.grey`/`palette` the `mono` scheme's source, so
+        `mono`'s words are byte-identical to today's.
+  - [x] Unit tests:
+    - `mono` equals today's greys;
+    - `gbc` equals the requirement table, including the worked CGRAM values
+      in F1;
+    - within each scheme, every colour maps to exactly one shade;
+    - no scheme puts `$7C1F` (the `Fatal` magenta) in colour 0;
+    - `default_scheme` is a valid id.
+  - [x] Verify: `zig build test`. No cart change yet, so the pins are
+        untouched.
+  - [x] Commit on the branch: "colour schemes: scheme data in Zig".
+
+- [ ] **Step 2: Oracle — SameBoy in GBC mode (F4)**
+  - [ ] `src/sbref.c`: `sbref_cgb_palettes(rom, rom_len, boot, boot_len,
+        bg_out[32], obj_out[32])`. It does `GB_init(GB_MODEL_CGB_E)`, loads
+        the boot ROM and the ROM from buffers, runs until the boot ROM hands
+        over (PC = `$0100`, with a frame cap), then copies BG and OBJ palette
+        RAM through `GB_get_direct_access`.
+  - [ ] Zig wrapper in `src/gb/sameboy.zig`, using `tester/cgb_boot.bin`.
+        Skip reasons: `no_rom`, `no_boot_rom`, and no SameBoy build
+        (`have_sameboy`).
+  - [ ] Rung `gbc palettes`:
+    - SameBoy's BG palette 0 equals `colors.gbc.bg`;
+    - OBJ palette 0 equals `obp0`, and OBJ palette 1 equals `obp1`;
+    - fault check: `mono`'s tables fail it.
+  - [ ] Verify: `zig build verify` shows the rung passing with `M2_ROM` set
+        and skipping cleanly with it unset.
+  - [ ] Commit: "colour schemes: SameBoy GBC palette oracle".
+
+- [ ] **Step 3: The HUD on its own palette slot (still grey)**
+  - [ ] Define `snes_target.hud_palette = 1` and mirror it in asm as
+        `!HUD_PAL`/`ConstHudPal`, checked by a symbol test like the others.
+  - [ ] Set the high byte to `!HUD_PAL<<2` in every BG2 map writer listed in
+        the overview, and change the Zig window-word encoder and decoder.
+        Then search again for any BG2 writer missed (`BG2_MAP`, `VMDATAH`,
+        `VMDATAL+1`).
+  - [ ] `LoadPalette` also writes the window table to CGRAM `$10-$13`.
+  - [ ] Check that `hud_oracle` and the death and Queen window paths still
+        decode BG2 words.
+  - [ ] Rung: the HUD reads its own slot. A fault that changes `$11` alters
+        a HUD pixel and no play-field pixel, and a fault on `$01` does the
+        reverse.
+  - [ ] Verify: the full gate (`verify`) is green with pixels unchanged.
+        Re-pin `retail` and `debug`, and `crawl` if `zig build repin` shows
+        it moved: "HUD moved to BG2 palette 1, colours unchanged".
+  - [ ] Commit, re-pin included.
+
+- [ ] **Step 4: Graders read colour through the scheme tables (cart unchanged)**
+  - [ ] First, confirm Mesen's BGR555 → RGB888 conversion on one framebuffer
+        read (expected `(c<<3)|(c>>2)`). The exact matching below depends on
+        it.
+  - [ ] `colors.luaShade(scheme)` emits a Lua `shade(px)` built from that
+        scheme's 16 words. It matches **exactly only**, and a colour outside
+        the scheme raises a Lua error naming the pixel and its RGB. Nothing
+        falls back to the nearest colour.
+  - [ ] Replace all six hand-written `shade` functions with the generated
+        one, parameterised by the expected scheme (the default, since the
+        rungs zero SRAM).
+  - [ ] Any rung that turns out to sample dimmed frames (a fade, the Queen's
+        flash), which the old thresholds tolerated, gets explicit handling
+        at that rung, with a comment. No blanket tolerance.
+  - [ ] Verify: `verify` and `verify-full` are green, still on greys. This
+        proves the helper reproduces today's thresholds.
+  - [ ] Commit: "graders: shade through the scheme tables".
+
+- [ ] **Step 5: Schemes in the cart; default `gbc` (F1, F3b)**
+  - [ ] Asm side:
+    - `SchemeTable`, a placeholder of `!SCHEMES × 16` words patched by the
+      builder (`snes_inject`, the same way it patches `BootPalette` today);
+    - `!SCHEMES`, `!DEFAULT_SCHEME` and WRAM `!Scheme`, mirrored and
+      symbol-tested against `colors.zig`.
+  - [ ] `LoadPalette` takes the scheme in `!Scheme` and loads `$00-$03`,
+        `$10-$13`, `$80-$83` and `$90-$93` from the table. `Reset` sets
+        `!Scheme = !DEFAULT_SCHEME` first, so every boot that skips the title
+        (scenario, handover) is the default.
+  - [ ] Retire the boot record's palette words: `BootPalette` (4 BG words)
+        and the 8 object palette words (`snes_inject.boot_obj_palette_at`).
+        `LoadPalette` is their only reader, and the scheme table replaces
+        them. Bump the record version, and update:
+    - the asm record layout and its `BootRecord` offsets;
+    - `snes_inject`'s writer (the `boot.palette`/`obj_palette` loops) and
+      its layout doc comment;
+    - the `palette`/`obj_palette` fields of `snes_screen`'s boot struct, and
+      every place that sets them;
+    - `snes_romtest`'s Lua that checks CGRAM against `boot.palette`, which
+      now checks against `cgramWords(default)`.
+  - [ ] Code 15 checks CGRAM against `cgramWords(default)` across all 16
+        entries. The old greys must fail it.
+  - [ ] A door fade under `gbc`: CGRAM is unchanged across the fade, and
+        INIDISP ramps as the `fade` rung already requires.
+  - [ ] A scenario-boot rung reads `gbc` words in CGRAM.
+  - [ ] Verify: `verify` and `verify-full` are green, with the Step 4 helper
+        set to `gbc`. Re-pin `retail` and `debug`, and `crawl` if
+        `zig build repin` shows it moved: "default colour scheme gbc".
+  - [ ] Commit, re-pin included.
+
+- [ ] **Step 6: Per-slot schemes in SRAM, and L on the title (F2, F3)**
+  - [ ] SRAM layout at `$701F00` (free, past the spawn flags): a 4-byte
+        magic, then one scheme byte per slot. Add constants and a comment
+        beside `!SRAM_SPAWN`, and teach `save.zig`'s layout the new region.
+  - [ ] Split the slot walk out of `TitleStart` into a side-effect-free
+        routine that returns "is a game" for a given slot. `TitleStart`
+        calls it unchanged in behaviour, and the title rungs prove that.
+        New code goes in bank 1, reached by `jsl` (bank 0 is nearly full).
+  - [ ] `SlotScheme(slot)`: if the slot is a game, the magic is good and the
+        byte is below `!SCHEMES`, return the byte. Otherwise return
+        `!DEFAULT_SCHEME`. Never index the table with an unchecked byte.
+  - [ ] On the title:
+    - at setup (forced blank), load `SlotScheme(ActiveSlot)` directly;
+    - in `TitleFrame` after `TitleSlotStep`, when the slot changes, set
+      `!Scheme` to that slot's scheme and set `!SchemeDue`;
+    - an L-alone edge steps `!Scheme` to the next id, wrapping, sets
+      `!SchemeDue`, and writes the magic and byte at once if the slot is a
+      game;
+    - after a clear, `!Scheme` goes to the default;
+    - Start writes the magic and the slot's byte (this covers an empty
+      slot's first game).
+  - [ ] NMI: when `!SchemeDue` is set, `jsl` an upload of the 16 CGRAM
+        words in vblank (the `!ReadoutFontDue` pattern).
+  - [ ] Rungs:
+    - (a) L recolours CGRAM to `mono` and back;
+    - (b) moving the slot recolours to that slot's scheme;
+    - (c) a saved slot keeps `mono` across `Reboot` and a fresh power-on,
+      while another slot keeps its own. The fixture is a real record: the
+      magic plus `BootSave`, the record a new game saves;
+    - (d) an empty slot's L choice is gone after moving away and back;
+    - (e) fault injection: a bad magic, and separately `$FF` with a good
+      magic, both boot `gbc` with the correct CGRAM;
+    - (f) Mesen write log: every `$2122` write lands in vblank or forced
+      blank;
+    - (g) debug cart: choose `mono`, start, warp, and the scheme is kept;
+    - (h) the title timing and TAS rungs are unchanged.
+  - [ ] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
+        `crawl` if `zig build repin` shows it moved.
+  - [ ] Commit, re-pin included.
+
+- [ ] **Step 7: The L badge in the bottom border (F2)**
+  - [ ] Draft `assets/title_badge.png` in our own art: a 16×16 L-button
+        glyph and one name strip per scheme (`MONO`, `GBC`). It uses
+        `title_super.png`'s rules: a fixed palette, checked colours, and
+        index 0 transparent. James can redraw it.
+  - [ ] `src/title_badge.zig`, following `title_super.zig`:
+    - it decodes the PNG and checks its colours;
+    - it emits a chr blob from a free BG1 character range, a palette for
+      BG palette 6 (CGRAM `$60`, free), and a map patch per scheme;
+    - it places the badge at the window's left edge in the bottom border.
+  - [ ] Engine:
+    - `UploadTitleArt` also uploads the badge's chr and palette, plus the
+      active scheme's patch;
+    - define `!BAND_BOTTOM_TM`, and turn BG1 on in the bottom band on the
+      title only; `ClearTitleArt` turns it off and clears the patch;
+    - `!SchemeDue`'s NMI upload also rewrites the name patch.
+  - [ ] Rungs:
+    - the badge's pixels in the border match `title_badge.png` for each
+      scheme;
+    - the badge is gone in play;
+    - the existing title rungs (window rows, "Super") are unchanged;
+    - the bottom-right corner stays empty.
+  - [ ] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
+        `crawl` if `zig build repin` shows it moved.
+  - [ ] Commit, re-pin included.
+
+- [ ] **Step 8: Docs, playtest, PR**
+  - [ ] `docs/feature_tracker.md`: a colour-schemes entry, graded by the
+        rungs above. README playing section: L on the title cycles the
+        colour scheme, and each file remembers its own.
+  - [ ] THIRD-PARTY-NOTICES: decide on a SameBoy line for the 12 colour
+        values (MIT) and add it if needed.
+  - [ ] `verify-gate` skill run: unit, policy, `verify`, `verify-full`,
+        pins.
+  - [ ] FXPak playtest (F6), each check able to fail:
+    - fresh SRAM shows a colour title with the `GBC` badge;
+    - L shows greys and `MONO`;
+    - a saved slot keeps its scheme after a power-cycle;
+    - acid turns Samus's flash green.
+  - [ ] Commit the docs, push, and open a PR to main, with the attribution
+        lines.
