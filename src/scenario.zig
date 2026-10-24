@@ -31,6 +31,7 @@ const save = @import("save.zig");
 const inject = @import("snes_inject.zig");
 const blocks = @import("blocks.zig");
 const debug_tables = @import("debug_tables.zig");
+const colors = @import("colors.zig");
 
 // ---- What the ROM says ------------------------------------------------------
 
@@ -529,6 +530,7 @@ pub fn code(c: u8) []const u8 {
         6 => "the new game's Samus is not its save record's",
         7 => "a second of play after closing, Samus is not what the menu left",
         8 => "the quake the kills armed did not run",
+        9 => "play did not open in the default colour scheme: CGRAM is not its 16 words",
         255 => "the emulator did not exit normally",
         else => if (c >= 10) "an edit's check disagreed with the ROM" else "an unknown code: a timeout, or a script error, reads as one",
     };
@@ -538,6 +540,15 @@ const frames_apart = 8;
 
 fn sym(name: []const u8) !u32 {
     return inject.symbol(name) orelse error.MissingSymbol;
+}
+
+/// The default colour scheme's CGRAM words, in `SchemeTable`'s order, for code
+/// 9: the gate zeroes SRAM and Start begins a new game, so play opens in the
+/// default. A global, `SCHEME_CGRAM`, to spend none of the chunk's locals.
+fn writeSchemeCgram(w: *std.Io.Writer) !void {
+    try w.print("SCHEME_CGRAM = {{", .{});
+    for (colors.cgramWords(colors.default_scheme)) |word| try w.print(" {d},", .{word});
+    try w.print(" }}\n", .{});
 }
 
 fn writeSamus(w: *std.Io.Writer, s: Samus) !void {
@@ -561,7 +572,8 @@ pub fn writeLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.I
         \\-- the end never arrived; 3 the chord or A did not open the menu; 4 an
         \\-- unrunnable pose; 5 B twice did not close it; 6 the new game's Samus
         \\-- is not its record's; 7 after a second of play Samus is not what the
-        \\-- menu left; 10 + k edit k's check. A failure prints what it compared.
+        \\-- menu left; 9 play is not in the default colour scheme; 10 + k edit
+        \\-- k's check. A failure prints what it compared.
         \\
         \\local wram  = emu.memType.snesWorkRam
         \\local cgram = emu.memType.snesCgRam
@@ -578,6 +590,8 @@ pub fn writeLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.I
         try sym("VarTanks"),      try sym("VarHealthLo"),   try sym("VarMaxMissLo"),
         try sym("VarCurMissLo"),  frames_apart,
     });
+
+    try writeSchemeCgram(w);
 
     // The presses, one every `APART` frames: the chord, A for SAMUS, then per
     // edit Down to its row and the edit's key, then B twice. A step's check is
@@ -653,6 +667,16 @@ pub fn writeLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.I
         \\  if phase == 3 and rd16(R.countdown) == 0 then
         \\    phase, tick = 4, 0
         \\    expect(6, "the new game", WANT[1])
+        \\    for p = 0, 3 do
+        \\      local base = ({{ 0x00, 0x20, 0x100, 0x120 }})[p + 1]
+        \\      for i = 0, 3 do
+        \\        local a = base + i * 2
+        \\        local c = emu.read(a, cgram) | (emu.read(a + 1, cgram) << 8)
+        \\        if c ~= SCHEME_CGRAM[p * 4 + i + 1] then
+        \\          fail(9, string.format("CGRAM $%02X is %04X, wanted %04X", a // 2, c, SCHEME_CGRAM[p * 4 + i + 1]))
+        \\        end
+        \\      end
+        \\    end
         \\  end
         \\  if phase ~= 4 then return end
         \\  tick = tick + 1
@@ -780,7 +804,7 @@ fn writeWorldLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.
         \\-- (`src/scenario.zig`). Then closed, a second of play, and checked again.
         \\--
         \\-- Exit codes as the SAMUS scenarios', and 8 the quake the kills armed did
-        \\-- not start and run out.
+        \\-- not start and run out, and 9 play is not in the default colour scheme.
         \\
         \\local wram  = emu.memType.snesWorkRam
         \\local cgram = emu.memType.snesCgRam
@@ -812,7 +836,9 @@ fn writeWorldLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.
 
     // The steps: the chord, Down to the page's root row and A, then per edit
     // the shortest way round to its row and its key, then B twice.
-    try w.print("}}\nWANT = {{\n  ", .{});
+    try w.print("}}\n", .{});
+    try writeSchemeCgram(w);
+    try w.print("WANT = {{\n  ", .{});
     try writeWant(w, start, watched, &live, false);
     var st = start;
     for (sc.world) |e| {
@@ -888,6 +914,16 @@ fn writeWorldLua(gpa: std.mem.Allocator, rom: []const u8, sc: Scenario, w: *std.
         \\  if phase == 3 and rd16(R.countdown) == 0 then
         \\    phase, tick = 4, 0
         \\    expect(6, "the new game", WANT[1])
+        \\    for p = 0, 3 do
+        \\      local base = ({{ 0x00, 0x20, 0x100, 0x120 }})[p + 1]
+        \\      for i = 0, 3 do
+        \\        local a = base + i * 2
+        \\        local c = emu.read(a, cgram) | (emu.read(a + 1, cgram) << 8)
+        \\        if c ~= SCHEME_CGRAM[p * 4 + i + 1] then
+        \\          fail(9, string.format("CGRAM $%02X is %04X, wanted %04X", a // 2, c, SCHEME_CGRAM[p * 4 + i + 1]))
+        \\        end
+        \\      end
+        \\    end
         \\  end
         \\  if phase ~= 4 then return end
         \\  tick = tick + 1

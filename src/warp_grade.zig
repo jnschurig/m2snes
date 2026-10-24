@@ -1138,7 +1138,7 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
                 if (e.dest.kind == .queen) break i;
             } else return error.NoQueenEntry;
             const gb = try queen.measure(a, rom, queen_frames[queen_frames.len - 1] + 2);
-            try colors.writeLuaShade(w, colors.fresh_scheme);
+            try colors.writeLuaShade(w, colors.default_scheme);
             try w.print("local QUEEN_ROW, VIEW_W, VIEW_H, WIN_LEFT, BAND_TOP = {d}, {d}, {d}, {d}, {d}\nQS = {{", .{
                 debug_tables.warpRow(sorted, i)[1], target.view_w, target.view_h, (target.screen_w - target.view_w) / 2, (target.screen_h - target.view_h) / 2,
             });
@@ -1326,7 +1326,7 @@ fn writeRefills(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
             try w.print("\"\n", .{});
         }
     }
-    try colors.writeLuaShade(w, colors.fresh_scheme);
+    try colors.writeLuaShade(w, colors.default_scheme);
     try w.print(
         \\-- Refill `k` for FRAMES frames: in OAM with its record's parts every
         \\-- frame, each coloured pixel of its characters the shade the palette

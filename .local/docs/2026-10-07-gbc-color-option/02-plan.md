@@ -8,6 +8,7 @@ updated:
   - 2026-10-14T19:16:28Z
   - 2026-10-24T01:31:03Z
   - 2026-10-24T02:23:17Z
+  - 2026-10-24T03:12:25Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -175,17 +176,17 @@ tripwire for `full`.
     script writes its fail frame to SRAM `$1F00-$1F01`, inside the planned
     `$701F00` scheme region.
 
-- [ ] **Step 5: Schemes in the cart; default `gbc` (F1, F3b)**
-  - [ ] Asm side:
+- [x] **Step 5: Schemes in the cart; default `gbc` (F1, F3b)**
+  - [x] Asm side:
     - `SchemeTable`, a placeholder of `!SCHEMES × 16` words patched by the
       builder (`snes_inject`, the same way it patches `BootPalette` today);
     - `!SCHEMES`, `!DEFAULT_SCHEME` and WRAM `!Scheme`, mirrored and
       symbol-tested against `colors.zig`.
-  - [ ] `LoadPalette` takes the scheme in `!Scheme` and loads `$00-$03`,
+  - [x] `LoadPalette` takes the scheme in `!Scheme` and loads `$00-$03`,
         `$10-$13`, `$80-$83` and `$90-$93` from the table. `Reset` sets
         `!Scheme = !DEFAULT_SCHEME` first, so every boot that skips the title
         (scenario, handover) is the default.
-  - [ ] Retire the boot record's palette words: `BootPalette` (4 BG words)
+  - [x] Retire the boot record's palette words: `BootPalette` (4 BG words)
         and the 8 object palette words (`snes_inject.boot_obj_palette_at`).
         `LoadPalette` is their only reader, and the scheme table replaces
         them. Bump the record version, and update:
@@ -196,15 +197,29 @@ tripwire for `full`.
       every place that sets them;
     - `snes_romtest`'s Lua that checks CGRAM against `boot.palette`, which
       now checks against `cgramWords(default)`.
-  - [ ] Code 15 checks CGRAM against `cgramWords(default)` across all 16
+  - [x] Code 15 checks CGRAM against `cgramWords(default)` across all 16
         entries. The old greys must fail it.
-  - [ ] A door fade under `gbc`: CGRAM is unchanged across the fade, and
+  - [x] A door fade under `gbc`: CGRAM is unchanged across the fade, and
         INIDISP ramps as the `fade` rung already requires.
-  - [ ] A scenario-boot rung reads `gbc` words in CGRAM.
-  - [ ] Verify: `verify` and `verify-full` are green, with the Step 4 helper
+  - [x] A scenario-boot rung reads `gbc` words in CGRAM.
+  - [x] Verify: `verify` and `verify-full` are green, with the Step 4 helper
         set to `gbc`. Re-pin `retail` and `debug`, and `crawl` if
         `zig build repin` shows it moved: "default colour scheme gbc".
-  - [ ] Commit, re-pin included.
+  - [x] Commit, re-pin included.
+  - Done as: `Reset` calls `LoadDefaultPalette`, a bank-1 entry that sets
+    `!Scheme` (WRAM `$07A2`) to `!DEFAULT_SCHEME` and falls into
+    `LoadPalette`; bank 0 is untouched. `SchemeTable` sits in bank 1 beside
+    it, $FF until `snes_inject.patchSchemes` writes it, which refuses an
+    engine whose `!SCHEMES`/`!SCHEME_WORDS` disagree with `colors.zig`.
+    Boot record v18 drops 24 bytes, and a new test checks every field's
+    offset against its engine label. `colors.fresh_scheme` is gone. The fade
+    check is the existing `fade` rung, which now also requires CGRAM to hold
+    the default's 16 words on every graded frame (code 252, off the
+    unhandled-pose range). The scenario-boot check is code 9 in every
+    `scenario` script: play opens on the default's words after fresh SRAM
+    and Start. Faults, run by hand: `mono`'s words in `gbc`'s slot make
+    `snes boot` exit 15; the fade grader expecting `mono` exits 252; the
+    scenarios expecting `mono` exit 9. The crawl didn't move.
 
 - [ ] **Step 6: Per-slot schemes in SRAM, and L on the title (F2, F3)**
   - [ ] SRAM layout at `$701F00` (free, past the spawn flags): a 4-byte

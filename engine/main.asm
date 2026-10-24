@@ -149,6 +149,14 @@ arch 65816
 ; of every window word: the palette, no priority, no flip.
 !HUD_PAL       = 1
 !HUD_ATTR      = !HUD_PAL<<2
+; The colour schemes `SchemeTable` holds (`colors.count`), the one fresh SRAM
+; and every boot that skips the title get (`colors.default_scheme`), and the
+; CGRAM words each one is (`colors.cgramWords`). An id is what SRAM stores, so
+; it never changes meaning.
+!SCHEMES        = 2
+!DEFAULT_SCHEME = 1             ; `gbc`
+!SCHEME_WORDS   = 16
+assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
 !BG12_CHAR_BASE = $1000
 ; BG34NBA: BG3 characters at word $0000.
 !BG34NBA_VALUE = $00
@@ -3538,6 +3546,7 @@ ConstCollBlobs = !COLL_BLOBS
 !XferEnd      = $07A0           ; bytes of `!XferQ` in use
 ; Colour schemes: from $07A1 on.
 !HudAttr      = $07A1           ; the status bar's words' high byte (`BarPut`)
+!Scheme       = $07A2           ; the active colour scheme's id (`LoadPalette`)
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -3988,6 +3997,10 @@ ConstBlkSize     = !BLK_SIZE
 ConstBlkRespawnIds = !BLK_RESPAWN_IDS
 ConstPlayPri     = !PLAY_PRI
 ConstHudPal      = !HUD_PAL
+ConstSchemes     = !SCHEMES
+ConstDefaultScheme = !DEFAULT_SCHEME
+ConstSchemeWords = !SCHEME_WORDS
+VarScheme        = !Scheme
 VarScreenPri     = !ScreenPri
 
 VarItemStage     = !ItemStage
@@ -4377,7 +4390,7 @@ Reset:
         jsr ClearVideoMemory
         jsr ApplySetup
         jsr InitHdma
-        jsl LoadPalette         ; bank 1
+        jsl LoadDefaultPalette  ; bank 1
         ; **`InitOam` moved in front of `InitState` in Step 7**, because the
         ; title screen is shown between them and a screen with 128 unparked
         ; sprites on it is a screen with a row of stray tiles across the top.
@@ -20102,7 +20115,7 @@ PoseBombed:
 !REGION_VERSION     = 1
 !REGION_CLASSES     = 17        ; snes_layout.Class, including `directory`
 !REGION_ENTRY_BYTES = 8
-!BOOT_VERSION       = 17
+!BOOT_VERSION       = 18
 !TILE_TABLES        = 10        ; screens.tiletable_order
 ; How many tiles a record may force into `!TilemapBuf` after the room is drawn.
 ; See `BootWorld` and `SeedWorld`; 168 is what fits between $00FC00 and the boot
@@ -24472,21 +24485,15 @@ BootTileTable:
         db $FF
 BootDoorIndex:
         dw $FFFF
-BootPalette:
-        dw $FFFF,$FFFF,$FFFF,$FFFF
+        ; Version 18 dropped the palettes that sat here and after the sheet id
+        ; (four BG words, then OBP0 and OBP1): `SchemeTable` holds every
+        ; scheme's colours now, and `LoadPalette` was their only reader.
 BootSamusChr:
         ; The `chr_obj` asset id of the power-suit sheet. The original loads it
         ; outside every door script - `loadGame_loadGraphics`, 00:05FD, copies
         ; $B00 bytes to vramDest_samus - so replaying a script does not put it
         ; in VRAM and the engine has to ask for it by name.
         db $FF
-BootObjPalette:
-        ; OBP0 then OBP1, as four SNES colours each. Two palettes rather than
-        ; one because `drawSamusSprite` sets the OBP1 bit on every part when
-        ; Samus is in acid or invulnerable, and a palette that was not loaded
-        ; would make the damage flash black rather than a flash.
-        dw $FFFF,$FFFF,$FFFF,$FFFF
-        dw $FFFF,$FFFF,$FFFF,$FFFF
 BootSamusY:
         ; Where Samus starts, as a whole world coordinate on each axis: the
         ; screen number in the high byte and the pixel within it in the low one.
@@ -31147,42 +31154,68 @@ UploadSamusBgTwin:
         rtl
 
 ; ---------------------------------------------------------------------------
-; The palettes, from the colours the builder patched into `BootRecord`: BG3's
-; palette 0, the window's and the two objects'.
+; Every colour scheme's CGRAM words, `!SCHEME_WORDS` a scheme, patched in by the
+; builder from `colors.cgramWords`: the one place a colour value lives. $FF
+; until then, so an unpatched image draws white.
+; ---------------------------------------------------------------------------
+SchemeTable:
+        fillbyte $FF : fill !SCHEMES*!SCHEME_WORDS*2
+
+; ---------------------------------------------------------------------------
+; The palettes of the scheme in `!Scheme`: BG3's palette 0, the window's and
+; the two objects', in `SchemeTable`'s order.
 ;
 ; Entry 0 is written even though the SNES treats a background colour 0 as
 ; transparent, because entry 0 is also the backdrop - and on the Game Boy a
 ; background pixel of index 0 is opaque and drawn with BGP's first field.
 ; Writing the same colour into both is what makes the two agree.
 ;
-; In bank 1 since colour schemes Step 3, read long, to make room in bank 0:
-; `Reset` calls it once.
+; In bank 1 since colour schemes Step 3, read long, to make room in bank 0.
+; `Reset` comes in at `LoadDefaultPalette`: WRAM is zero there, and every boot
+; that skips the title plays in the default.
 ; ---------------------------------------------------------------------------
+LoadDefaultPalette:
+        sep #$20
+        lda.b #!DEFAULT_SCHEME
+        sta.w !Scheme
 LoadPalette:
+        php
+        rep #$30
+        lda.w !Scheme
+        and.w #$00FF
+        asl
+        asl
+        asl
+        asl
+        asl                             ; !SCHEME_WORDS*2 bytes a scheme
+        tax
         sep #$20
         stz !CGADD
-        ldx #$0000
--       lda.l BootPalette,x
+        ldy.w #$0008
+-       lda.l SchemeTable,x
         sta !CGDATA
         inx
-        cpx #$0008
+        dey
         bne -
-        ; The window's, BG2 palette `!HUD_PAL`: the same four until a colour
-        ; scheme gives the HUD its own. Entry 0 is BG2's transparent colour,
-        ; written for the same reason the objects' is.
+        ; The window's, BG2 palette `!HUD_PAL`. Entry 0 is BG2's transparent
+        ; colour, written for the same reason the objects' is.
         lda.b #!HUD_PAL<<4
         sta !CGADD
-        ldx #$0000
--       lda.l BootPalette,x
+        ldy.w #$0008
+-       lda.l SchemeTable,x
         sta !CGDATA
         inx
-        cpx #$0008
+        dey
         bne -
         ; The object palettes. CGRAM's second half belongs to the sprites: the
         ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
         ; go into it and the one after. Entry 0 of each is written and never
         ; seen - a sprite pixel of colour 0 is transparent - which is the one
         ; place where the SNES and the Game Boy agree without being made to.
+        ;
+        ; Two palettes rather than one because `drawSamusSprite` sets the OBP1
+        ; bit on every part when Samus is in acid or invulnerable, and a
+        ; palette that was not loaded would make the damage flash black.
         ;
         ; **An object palette is sixteen colours**, so the one after is colour
         ; $90, which is what `PutObject`'s palette 1 reads. Until 1.0 Step 8b's
@@ -31191,20 +31224,22 @@ LoadPalette:
         ; drew black on the black play field. `snes boot` code 15 reads $90.
         lda.b #$80
         sta !CGADD
-        ldx #$0000
--       lda.l BootObjPalette,x
+        ldy.w #$0008
+-       lda.l SchemeTable,x
         sta !CGDATA
         inx
-        cpx #$0008
+        dey
         bne -
 .obp1                                   ; the warp rung's `refills` fault patches this
         lda.b #$90
         sta !CGADD
--       lda.l BootObjPalette,x
+        ldy.w #$0008
+-       lda.l SchemeTable,x
         sta !CGDATA
         inx
-        cpx #$0010
+        dey
         bne -
+        plp
         rtl
 
 ; The window's map to $FF, as `bootRoutine`'s `clearTilemaps` (00:$01FB) and

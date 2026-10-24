@@ -654,11 +654,6 @@ pub const Boot = struct {
     door_index: u16,
     /// The metatile table that script left selected.
     tiletable: u4,
-    palette: [4]u16,
-    /// OBP0 then OBP1, as the engine writes them into the first two object
-    /// palettes. `drawSamusSprite` moves every part to the second one while
-    /// Samus is invulnerable or in acid.
-    obj_palette: [8]u16,
     /// The `chr_obj` asset id of Samus's power-suit sheet. The injector fills
     /// this in - the converter assigns the id, and `chooseBoot` runs before
     /// conversion - so it is left at the sentinel here.
@@ -939,8 +934,6 @@ pub fn bootCandidates(allocator: std.mem.Allocator, rom: []const u8, limit: usiz
                 .cell = cell,
                 .door_index = choice.door_index,
                 .tiletable = choice.tiletable,
-                .palette = palette(screens.live_bgp),
-                .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
                 .samus_x = start.x,
                 .samus_y = start.y,
                 .cam_x = start.x,
@@ -1020,8 +1013,6 @@ pub fn bootIn(a: screens.Assignment, rom: []const u8, map_index: u8, cell: u8) E
                 .cell = at,
                 .door_index = choice.door_index,
                 .tiletable = choice.tiletable,
-                .palette = palette(screens.live_bgp),
-                .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
                 .samus_x = start.x,
                 .samus_y = start.y,
                 .cam_x = start.x,
@@ -1053,8 +1044,6 @@ pub fn chooseBoot(allocator: std.mem.Allocator, rom: []const u8) Error!Boot {
             .cell = cell,
             .door_index = choice.door_index,
             .tiletable = choice.tiletable,
-            .palette = palette(screens.live_bgp),
-            .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
             .samus_x = start.x,
             .samus_y = start.y,
             .cam_x = start.x,

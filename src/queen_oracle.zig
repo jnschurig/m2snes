@@ -839,7 +839,7 @@ pub fn writeLua(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
         last = @max(last, f);
     };
     try w.print("}}\nlocal LAST = {d}\n", .{last});
-    try colors.writeLuaShade(w, colors.fresh_scheme);
+    try colors.writeLuaShade(w, colors.default_scheme);
     try w.print("local WOKE = 0x{X:0>6}\nlocal DIVHIGH, DIVSITE, DIVS = 0x{X:0>4}, 0x{X:0>6}, {{", .{ woke, (try warp_grade.sym("VarDivClock") & 0xFFFF) + 1, site });
     for (gb.divs) |d| try w.print("{d},", .{d});
     try w.print(

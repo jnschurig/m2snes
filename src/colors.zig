@@ -20,14 +20,8 @@ pub const Scheme = enum(u8) {
 };
 
 /// What fresh SRAM, a bad scheme byte, and every boot that skips the title
-/// get.
+/// get. The gate's rungs zero SRAM first, so this is the scheme they grade.
 pub const default_scheme: Scheme = .gbc;
-
-/// The scheme the cart boots in with fresh SRAM, which is what the gate's
-/// rungs see: they zero SRAM first. Still `mono` because the cart carries no
-/// schemes yet. Colour schemes Step 5 makes the cart boot `default_scheme`
-/// and retires this.
-pub const fresh_scheme: Scheme = .mono;
 
 /// Four BGR555 colours, shade 0 (lightest) first.
 pub const Table = [4]u16;

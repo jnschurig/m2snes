@@ -51,6 +51,7 @@
 //! expected picture. The code protocol is below and is read back by `verify`.
 
 const std = @import("std");
+const colors = @import("colors.zig");
 const harness = @import("gb/harness.zig");
 const probe = @import("gb/probe.zig");
 const room = @import("room.zig");
@@ -2984,7 +2985,7 @@ pub const code_pose: u8 = code_camera + codes_per_quantity;
 /// implemented, so it cannot reach here. A pose past the range saturates on the
 /// last code and `unhandledPose` says so rather than reporting a wrong number.
 pub const code_unhandled: u8 = code_pose + codes_per_quantity;
-pub const codes_unhandled: usize = code_obp1 - @as(usize, code_unhandled);
+pub const codes_unhandled: usize = code_fade_cgram - @as(usize, code_unhandled);
 
 /// Samus's health diverged (1.0 Step 9), on some frame of the take: one code,
 /// the last below the emulator's own timeout, taken off the top of the
@@ -2996,6 +2997,11 @@ pub const code_health: u8 = 254;
 /// takes that grade health: one code, the next down, taken off the unhandled
 /// poses' range, which still holds poses up to $34.
 pub const code_obp1: u8 = 253;
+
+/// CGRAM changed during the fade (colour schemes Step 5): a fade dims with
+/// INIDISP and leaves the scheme's colours alone. One code, the next down,
+/// taken off the unhandled poses' range, which still holds poses up to $33.
+pub const code_fade_cgram: u8 = 252;
 
 /// The pose an unhandled-pose exit was carrying, and whether it is exact.
 ///
@@ -3039,6 +3045,7 @@ pub fn explain(code: u8) []const u8 {
         code_short => "the segment ended early",
         code_frame_phase => "the cart's frame counter was not the boot record's seed plus one on MainLoop's first frame",
         code_setup => "the debug menu did not set the loadout up: shut too soon, open after, or the items not the ones asked for",
+        code_fade_cgram => "CGRAM changed during the fade: it should dim with INIDISP and keep the scheme's colours",
         255 => "the emulator timed out with no verdict",
         // The pose itself is in the code and callers print it; this is the
         // sentence that goes in front of it. Kept out of `explain`'s return
@@ -4186,8 +4193,6 @@ pub fn gradeRef(
             .cell = cell,
             .door_index = 0,
             .tiletable = 0,
-            .palette = @splat(0),
-            .obj_palette = @splat(0),
             .samus_x = pos.x,
             .samus_y = pos.y,
             .cam_x = mr.settled.frames[0].camera_x,
@@ -5480,8 +5485,13 @@ pub fn writeFadeLua(
     try w.print("local FADE = {{\n", .{});
     for (rows, 0..) |r, j| try w.print("  [{d}] = {{{d},{d}}},\n", .{ r.index + 1, r.want, j });
     try w.print("}}\n", .{});
+    // The default scheme's words, which the gate's fresh SRAM boots in: the
+    // fade dims them with INIDISP and never rewrites them.
+    try w.print("local FADE_CGRAM = {{", .{});
+    for (colors.cgramWords(colors.default_scheme)) |word| try w.print(" {d},", .{word});
+    try w.print(" }}\n", .{});
     try w.print(
-        \\local CODE_FADE, FADE_PER = {d}, {d}
+        \\local CODE_FADE, FADE_PER, CODE_FADE_CGRAM = {d}, {d}, {d}
         \\local fadeCommits = 0
         \\emu.addMemoryCallback(function()
         \\  fadeCommits = fadeCommits + 1
@@ -5495,9 +5505,17 @@ pub fn writeFadeLua(
         \\  if got ~= row[1] then
         \\    emu.stop(CODE_FADE + (row[2] // FADE_PER))
         \\  end
+        \\  for p = 0, 3 do
+        \\    local base = ({{ 0x00, 0x20, 0x100, 0x120 }})[p + 1]
+        \\    for i = 0, 3 do
+        \\      local a = base + i * 2
+        \\      local c = emu.read(a, emu.memType.snesCgRam) | (emu.read(a + 1, emu.memType.snesCgRam) << 8)
+        \\      if c ~= FADE_CGRAM[p * 4 + i + 1] then emu.stop(CODE_FADE_CGRAM) end
+        \\    end
+        \\  end
         \\end, emu.callbackType.exec, 0x{X:0>6}, 0x{X:0>6}, emu.cpuType.snes, emu.memType.snesMemory)
         \\
-    , .{ code_fade, fadePerCode(rows.len), commit, commit });
+    , .{ code_fade, fadePerCode(rows.len), code_fade_cgram, commit, commit });
 }
 
 pub const fade_cart_name = out_dir ++ "/fade.sfc";

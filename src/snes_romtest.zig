@@ -575,7 +575,7 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\--  12  no character data reached VRAM
         \\--  13  the tilemap was never uploaded
         \\--  14  the boot record's cell was not seeded into the engine's state
-        \\--  15  the palette in CGRAM is not the one the builder patched in
+        \\--  15  CGRAM does not hold the default colour scheme's 16 words (`colors.cgramWords`)
         \\--  16  the frame counter's phase: NMI ran a different number of times
         \\--      between the boot record's seed and the first frame of MainLoop
         \\--  17  the play window straddled two screens where a picture was compared
@@ -720,7 +720,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\local VIEW_W, VIEW_H, SCREEN_PX = {d}, {d}, {d}
         \\local WIN_LEFT, BAND_TOP = {d}, {d}
         \\local CELL, CELL_AFTER_OPEN = {d}, {d}
-        \\local PALETTE = {{ {d}, {d}, {d}, {d} }}
         \\
     , .{
         screen.ram.frame_count,      screen.ram.cell,
@@ -738,8 +737,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         screens.screen_px,
         screen.win_left,             screen.band_top,
         boot.cell,                   plan.after_open,
-        boot.palette[0],             boot.palette[1],
-        boot.palette[2],             boot.palette[3],
     });
 
     // The bit the *cartridge's* Bomb arm sets, read out of its `SET n,A` rather
@@ -1434,17 +1431,16 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         try w.print("\n}}\n", .{});
     }
     try w.print("\n", .{});
-    // OBP1, as the builder converts it: the palette `PutObject` selects for a
-    // Game Boy object with bit 4 of its attribute set. Its own `print` for the
-    // thirty-two-argument ceiling below. A global and not a `local`: the
-    // script's main chunk is at Lua's 200 locals.
-    try w.print("OBJ_PALETTE1 = {{ {d}, {d}, {d}, {d} }}\n", .{
-        boot.obj_palette[4], boot.obj_palette[5], boot.obj_palette[6], boot.obj_palette[7],
-    });
+    // The 16 CGRAM words the default scheme loads, in `SchemeTable`'s order:
+    // BG palette 0, the window's, OBP0's and OBP1's. The gate zeroes SRAM and
+    // this script boots past the title, so the cart is in the default. A
+    // global and not a `local`: the script's main chunk is at Lua's 200.
+    try w.print("SCHEME_CGRAM = {{", .{});
+    for (colors.cgramWords(colors.default_scheme)) |word| try w.print(" {d},", .{word});
+    try w.print(" }}\n", .{});
 
     try w.print(
         \\-- Drawing Samus.
-        \\local OBJ_PALETTE = {{ {d}, {d}, {d}, {d} }}
         \\local RAM_FACING, RAM_SPRID = {d}, {d}
         \\local RAM_SPRX, RAM_SPRY, RAM_OAMIDX = {d}, {d}, {d}
         \\local OAM_X_OFS, OAM_Y_OFS = {d}, {d}
@@ -1455,8 +1451,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\local MASK_MAX = 16 * 64
         \\
     , .{
-        boot.obj_palette[0],         boot.obj_palette[1],
-        boot.obj_palette[2],         boot.obj_palette[3],
         screen.ram.facing,           screen.ram.sprite_id,
         screen.ram.sprite_x,         screen.ram.sprite_y,
         screen.ram.oam_index,
@@ -1518,7 +1512,7 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
     try writeScreen(w, "SCREEN", here);
     try writeScreen(w, "SCREEN_AFTER", after);
     try writeSprites(w, set);
-    try colors.writeLuaShade(w, colors.fresh_scheme);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\-- Mesen hands back a 256x239 overscan frame as a ONE-BASED lua table, so
@@ -1688,20 +1682,20 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  -- Version 15: and the damage a room does, or acid takes nothing off.
         \\  if emu.read(MS.acid, wram) ~= MS.wantAcid then emu.stop(197) end
         \\  if emu.read(MS.spike, wram) ~= MS.wantSpike then emu.stop(197) end
-        \\  for i = 0, 3 do
-        \\    if rd16(i * 2, cgram) ~= PALETTE[i + 1] then emu.stop(15) end
-        \\    -- The window's, BG2 palette 1 (colour $10), the same four for now.
-        \\    if rd16(0x20 + i * 2, cgram) ~= PALETTE[i + 1] then emu.stop(15) end
-        \\    -- The object half of CGRAM. Colour $80 is the first object
-        \\    -- palette, which is where OBP0 goes; entry 0 of it is never shown
-        \\    -- and is checked anyway, because it is written.
-        \\    if rd16(0x100 + i * 2, cgram) ~= OBJ_PALETTE[i + 1] then emu.stop(15) end
-        \\    -- And OBP1 in object palette 1, which `PutObject` selects for bit 4
-        \\    -- of a Game Boy attribute. An object palette is sixteen colours, so
-        \\    -- palette 1 is colour $90, not the $84 after OBP0's four: the
-        \\    -- frozen enemy, a stunned one's flash and a blinking drop drew
-        \\    -- black until 1.0 Step 8b's playtest (`docs/bug_tracker.md`).
-        \\    if rd16(0x120 + i * 2, cgram) ~= OBJ_PALETTE1[i + 1] then emu.stop(15) end
+        \\  -- The default scheme's 16 words, all of them: BG palette 0, the
+        \\  -- window's (BG2 palette 1, colour $10), and the object half of CGRAM.
+        \\  -- Colour $80 is the first object palette, OBP0's; entry 0 of it is
+        \\  -- never shown and is checked anyway, because it is written. OBP1 is
+        \\  -- object palette 1, which `PutObject` selects for bit 4 of a Game
+        \\  -- Boy attribute. An object palette is sixteen colours, so palette 1
+        \\  -- is colour $90, not the $84 after OBP0's four: the frozen enemy, a
+        \\  -- stunned one's flash and a blinking drop drew black until 1.0 Step
+        \\  -- 8b's playtest (`docs/bug_tracker.md`).
+        \\  for p = 0, 3 do
+        \\    local base = ({{ 0x00, 0x20, 0x100, 0x120 }})[p + 1]
+        \\    for i = 0, 3 do
+        \\      if rd16(base + i * 2, cgram) ~= SCHEME_CGRAM[p * 4 + i + 1] then emu.stop(15) end
+        \\    end
         \\  end
         \\end
         \\
@@ -5132,7 +5126,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
     // exist when it is created and these are read inside one.
     try writeBytes(w, "TITLE_CHR", run);
     try writeBytes(w, "TITLE_IDS", ids);
-    try colors.writeLuaShade(w, colors.fresh_scheme);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\
@@ -6745,7 +6739,7 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
     try writeBytes(w, "OBJCHR", obj_chr);
     try writeBytes(w, "AFTER", &run.slots_after);
     try writeSramPrelude(w, &seed);
-    try colors.writeLuaShade(w, colors.fresh_scheme);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\

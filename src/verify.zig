@@ -3589,7 +3589,7 @@ fn bootVerdict(exit: u8) BootTest {
         12 => .{ .stalled = "no character data reached VRAM" },
         13 => .{ .stalled = "the tilemap was never uploaded" },
         14 => .{ .stalled = "the boot record's cell was not seeded into the engine's state" },
-        15 => .{ .stalled = "CGRAM does not hold the palette the builder patched in" },
+        15 => .{ .stalled = "CGRAM does not hold the default colour scheme's 16 words" },
         16 => .{ .stalled = "the frame counter's phase is wrong: NMI ran a different number of times between the boot record's seed and MainLoop's first frame" },
         17 => .{ .stalled = "the play window straddled two screens where a picture was compared" },
         18 => .{ .camera = "never reached the guide offset it holds Samus at while she walks, or drifted off it" },
