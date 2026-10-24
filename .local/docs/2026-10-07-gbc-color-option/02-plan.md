@@ -5,6 +5,8 @@ updated:
   - 2026-10-12T01:38:51Z
   - 2026-10-12T02:29:18Z
   - 2026-10-14T14:59:17Z
+  - 2026-10-14T19:16:28Z
+  - 2026-10-24T01:31:03Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -88,40 +90,57 @@ tripwire for `full`.
         untouched.
   - [x] Commit on the branch: "colour schemes: scheme data in Zig".
 
-- [ ] **Step 2: Oracle — SameBoy in GBC mode (F4)**
-  - [ ] `src/sbref.c`: `sbref_cgb_palettes(rom, rom_len, boot, boot_len,
+- [x] **Step 2: Oracle — SameBoy in GBC mode (F4)**
+  - [x] `src/sbref.c`: `sbref_cgb_palettes(rom, rom_len, boot, boot_len,
         bg_out[32], obj_out[32])`. It does `GB_init(GB_MODEL_CGB_E)`, loads
         the boot ROM and the ROM from buffers, runs until the boot ROM hands
         over (PC = `$0100`, with a frame cap), then copies BG and OBJ palette
         RAM through `GB_get_direct_access`.
-  - [ ] Zig wrapper in `src/gb/sameboy.zig`, using `tester/cgb_boot.bin`.
+  - [x] Zig wrapper in `src/gb/sameboy.zig`, using `tester/cgb_boot.bin`.
         Skip reasons: `no_rom`, `no_boot_rom`, and no SameBoy build
         (`have_sameboy`).
-  - [ ] Rung `gbc palettes`:
+  - [x] Rung `gbc palettes`:
     - SameBoy's BG palette 0 equals `colors.gbc.bg`;
     - OBJ palette 0 equals `obp0`, and OBJ palette 1 equals `obp1`;
     - fault check: `mono`'s tables fail it.
-  - [ ] Verify: `zig build verify` shows the rung passing with `M2_ROM` set
+  - [x] Verify: `zig build verify` shows the rung passing with `M2_ROM` set
         and skipping cleanly with it unset.
-  - [ ] Commit: "colour schemes: SameBoy GBC palette oracle".
+  - [x] Commit: "colour schemes: SameBoy GBC palette oracle".
+  - Done as: the wrapper is `src/gbc_oracle_run.zig` (links SameBoy) with the
+    grade in `src/gbc_oracle.zig` (unit-tested), following the
+    `audio_level`/`audio_level_run` split; `sameboy.zig` stays link-free.
+    SameBoy's Core now builds with `-fno-sanitize=undefined`, as SameBoy
+    builds itself: its CPU's signed shifts trapped UBSan once a ROM ran.
+    With `M2_ROM` unset, `zig build verify` refuses before any rung runs.
 
-- [ ] **Step 3: The HUD on its own palette slot (still grey)**
-  - [ ] Define `snes_target.hud_palette = 1` and mirror it in asm as
+- [x] **Step 3: The HUD on its own palette slot (still grey)**
+  - [x] Define `snes_target.hud_palette = 1` and mirror it in asm as
         `!HUD_PAL`/`ConstHudPal`, checked by a symbol test like the others.
-  - [ ] Set the high byte to `!HUD_PAL<<2` in every BG2 map writer listed in
+  - [x] Set the high byte to `!HUD_PAL<<2` in every BG2 map writer listed in
         the overview, and change the Zig window-word encoder and decoder.
         Then search again for any BG2 writer missed (`BG2_MAP`, `VMDATAH`,
         `VMDATAL+1`).
-  - [ ] `LoadPalette` also writes the window table to CGRAM `$10-$13`.
-  - [ ] Check that `hud_oracle` and the death and Queen window paths still
+  - [x] `LoadPalette` also writes the window table to CGRAM `$10-$13`.
+  - [x] Check that `hud_oracle` and the death and Queen window paths still
         decode BG2 words.
-  - [ ] Rung: the HUD reads its own slot. A fault that changes `$11` alters
+  - [x] Rung: the HUD reads its own slot. A fault that changes `$11` alters
         a HUD pixel and no play-field pixel, and a fault on `$01` does the
         reverse.
-  - [ ] Verify: the full gate (`verify`) is green with pixels unchanged.
+  - [x] Verify: the full gate (`verify`) is green with pixels unchanged.
         Re-pin `retail` and `debug`, and `crawl` if `zig build repin` shows
         it moved: "HUD moved to BG2 palette 1, colours unchanged".
-  - [ ] Commit, re-pin included.
+  - [x] Commit, re-pin included.
+  - Done as: the status bar has its own put, `BarPut`, whose high byte is
+    `!HudAttr` (WRAM `$07A1`, the start of the free `$07A1-$07CA`).
+    `UpdateStatusBar` sets it with `!HudBase`, so in the Queen's room the bar
+    stays a BG3 row on palette 0, and `StatusBarLCounter` reads it too.
+    `LoadPalette` moved to bank 1 (`jsl`, long reads of the boot record):
+    bank 0 had 7 bytes free and the step needed ~40; it now has 44. The rung
+    is two phases at the end of `cold boot` (codes 158/159): it makes
+    `$11-$13`, then `$01-$03`, green for a frame and checks where the green
+    lands. Code 15 also checks `$10-$13`. The faults: the engine before this
+    step exits 158 (run by hand), and `UpdateStatusBar_hudAttr` patched to
+    `#$00` exits 159 (in the gate). The crawl didn't move.
 
 - [ ] **Step 4: Graders read colour through the scheme tables (cart unchanged)**
   - [ ] First, confirm Mesen's BGR555 → RGB888 conversion on one framebuffer

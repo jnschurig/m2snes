@@ -1189,7 +1189,9 @@ pub fn main(init: std.process.Init) !void {
                 });
                 try out.print("      the sequence      the countdown falls one a frame, she is drawn on three frames in four,\n", .{});
                 try out.print("                        control waits for a button after it is spent, and then she walks\n", .{});
-                try out.print("      no lever          nothing is written to the cart at any point; the input is Start and a direction\n", .{});
+                try out.print("      no lever          nothing is written to the cart until she walks; the input is Start and a direction\n", .{});
+                try out.print("      the HUD's palette CGRAM $11-$13 made green shows on the status bar's lines alone, and\n", .{});
+                try out.print("                        $01-$03 off them alone: the HUD reads its own slot\n", .{});
 
                 // And the rung is not vacuous. The cheapest fault that reaches
                 // the whole mechanism is in the record rather than in the
@@ -1210,6 +1212,25 @@ pub fn main(init: std.process.Init) !void {
                         try out.print("FAIL  cold boot        a cart whose countdown starts spent still passed: the rung grades nothing\n", .{});
                     },
                     else => try out.print("      fault sweep       a record with the countdown at zero fails it\n", .{}),
+                }
+                // Colour schemes Step 3: the bar's own cells written on the
+                // play field's palette (`lda #$00` for `!HUD_ATTR`), as every
+                // window word was before the step. The play field's green
+                // then reaches the status bar's lines, which is code 159.
+                const attr_at = (snes_inject.symbolOffset("UpdateStatusBar_hudAttr") orelse return error.MissingSymbol) + 1;
+                const hud_fault = try arena.dupe(u8, rom.bytes);
+                hud_fault[attr_at] = 0x00;
+                switch (try coldBootTest(init.io, hud_fault, lua.written())) {
+                    .sequence => |why| if (std.mem.indexOf(u8, why, "($01-$03)") != null) {
+                        try out.print("      fault sweep       the bar's digits on the play field's palette fail the HUD's\n", .{});
+                    } else {
+                        failures += 1;
+                        try out.print("FAIL  cold boot        the bar's digits on palette 0 failed elsewhere: {s}\n", .{why});
+                    },
+                    else => {
+                        failures += 1;
+                        try out.print("FAIL  cold boot        the bar's digits on palette 0 did not fail the HUD's palette check\n", .{});
+                    },
                 }
             },
             .no_emulator => {
@@ -3009,6 +3030,8 @@ fn coldBootTest(io: std.Io, rom: []const u8, lua: []const u8) !ColdTest {
         155 => .{ .sequence = "Samus drew over the ship where its colour is not 0: the start cell's transition word has bit 11, and the Game Boy puts her behind it" },
         156 => .{ .sequence = "Samus's parts covered none of the ship's pixels, or none of hers showed: the behind check graded nothing" },
         157 => .{ .sequence = "no drawn frame followed a blank one in the appearance sequence: the behind check never ran" },
+        158 => .{ .sequence = "the HUD's colours ($11-$13) made green showed nowhere, or off the status bar's lines: the HUD is not on its own palette" },
+        159 => .{ .sequence = "the play field's colours ($01-$03) made green showed nowhere, or on the status bar's lines: the two share a palette" },
         255 => .{ .failed = "the emulator timed out: the script never reached a verdict" },
         else => .{ .failed = "the cold-boot script exited with an unallocated code" },
     };

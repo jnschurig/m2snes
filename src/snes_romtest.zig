@@ -364,7 +364,7 @@ fn writeGfxDoor(gpa: std.mem.Allocator, w: *std.Io.Writer, di: usize, gb_dest: u
     // `ITEM`; a door without one leaves the row as the door before left it.
     if (name) |n| {
         try w.writeAll(", name = {");
-        for (n) |b| try w.print("{d},", .{b});
+        for (n) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
         try w.writeAll("}");
     }
     try w.writeAll(" },\n");
@@ -411,7 +411,7 @@ fn writeBar(rom: []const u8, w: *std.Io.Writer) !void {
         @as(u16, @truncate(inject.symbol("VarWinY") orelse return error.MissingSymbol)),
         try blocks_mod.loadAt(rom, 0x580D), try blocks_mod.loadAt(rom, 0x582A),
     });
-    for (text) |b| try w.print("{d},", .{b});
+    for (text) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
     try w.print("}}\nHUD.font = {{\n", .{});
     const arm = convert.itemArm(rom) orelse return error.NoItemArm;
     const font = rom[blocks_mod.offsetIn(arm.font_bank, arm.font_src)..][0..arm.font_len];
@@ -1674,7 +1674,8 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  if words == 0 then emu.stop(13) end
         \\  -- Step 24g: the window's second row is `saveTextTilemap`, which
         \\  -- `loadTitleScreen` copies there (05:$40A0) and the bar shows at a
-        \\  -- station. Palette 0, no priority, as `HudPut` writes the first row.
+        \\  -- station. Words as `target.windowWord` makes them and `HudPut`
+        \\  -- writes the first row: the HUD's palette, no priority.
         \\  for i = 0, #HUD.boot - 1 do
         \\    if rd16(HUD.map + 64 + i * 2, vram) ~= HUD.boot[i + 1] then emu.stop(3) end
         \\  end
@@ -1693,6 +1694,8 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  if emu.read(MS.spike, wram) ~= MS.wantSpike then emu.stop(197) end
         \\  for i = 0, 3 do
         \\    if rd16(i * 2, cgram) ~= PALETTE[i + 1] then emu.stop(15) end
+        \\    -- The window's, BG2 palette 1 (colour $10), the same four for now.
+        \\    if rd16(0x20 + i * 2, cgram) ~= PALETTE[i + 1] then emu.stop(15) end
         \\    -- The object half of CGRAM. Colour $80 is the first object
         \\    -- palette, which is where OBP0 goes; entry 0 of it is never shown
         \\    -- and is checked anyway, because it is written.
@@ -5084,6 +5087,10 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- 156  her parts covered no pixel of the ship's, or none of hers showed:
         \\--      155 graded nothing
         \\-- 157  no drawn frame followed a blank one in the appearance sequence
+        \\-- 158  the HUD's colours ($11-$13) made green showed nowhere, or not
+        \\--      only on the status bar's lines: the HUD is not on its own palette
+        \\-- 159  the play field's ($01-$03) made green showed nowhere, or on the
+        \\--      status bar's lines: the play field shares the HUD's palette
         \\
         \\local wram  = emu.memType.snesWorkRam
         \\local vram  = emu.memType.snesVideoRam
@@ -5106,6 +5113,9 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- Step 24e: the Game Boy's first play row under the status bar, and
         \\-- where the engine keeps BGP, whose low two bits are colour 0's shade.
         \\BEHIND = {{ rows = {d}, bgp = {d}, blank = nil, at = nil, done = false }}
+        \\-- Colour schemes Step 3: the HUD's BG2 palette, as a CGRAM byte offset,
+        \\-- and the play field's, BG3's palette 0.
+        \\PROBE = {{ hud = {d}, play = 0, saved = nil }}
         \\
     , .{
         screen.ram.frame_count, screen.ram.pose,      screen.ram.unhandled,
@@ -5118,6 +5128,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         screen.win_left,        screen.band_top,
         try iconBytes(rom, 0),  try iconBytes(rom, 1),
         try engineDefine("!HUD_WY         = $"), try engineDefine("!BgPalette    = $"),
+        @as(u16, target.hud_palette) * 16 * 2,
     });
     try writeSramPrelude(w, &.{});
 
@@ -5186,6 +5197,42 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\    end
         \\  end
         \\  return parts, over, seen
+        \\end
+        \\
+        \\-- Colour schemes Step 3: which lines a palette reaches. Its three
+        \\-- visible colours are made green, which no palette has, for a frame,
+        \\-- and the green pixels counted on the status bar's lines and off them.
+        \\-- CGRAM only, and put back after the frame.
+        \\function probePoke(base)
+        \\  PROBE.saved = {{}}
+        \\  for i = 1, 3 do
+        \\    PROBE.saved[i] = rd16(base + i * 2, cgram)
+        \\    emu.write(base + i * 2, 0xE0, cgram)
+        \\    emu.write(base + i * 2 + 1, 0x03, cgram)
+        \\  end
+        \\end
+        \\function probeRestore(base)
+        \\  for i = 1, 3 do
+        \\    emu.write(base + i * 2, PROBE.saved[i] & 0xFF, cgram)
+        \\    emu.write(base + i * 2 + 1, PROBE.saved[i] >> 8, cgram)
+        \\  end
+        \\end
+        \\function probeGreen(buf)
+        \\  local bar, rest = 0, 0
+        \\  local top = BAND_TOP + OVERSCAN
+        \\  for y = 0, 238 do
+        \\    for x = 0, 255 do
+        \\      local px = buf[y * 256 + x + 1]
+        \\      if (px >> 16) & 0xFF < 16 and (px >> 8) & 0xFF > 240 and px & 0xFF < 16 then
+        \\        if y >= top + BEHIND.rows and y < top + VIEW_H and x >= WIN_LEFT and x < WIN_LEFT + VIEW_W then
+        \\          bar = bar + 1
+        \\        else
+        \\          rest = rest + 1
+        \\        end
+        \\      end
+        \\    end
+        \\  end
+        \\  return bar, rest
         \\end
         \\
         \\local frames, phase, since, checked = 0, 0, 0, false
@@ -5334,11 +5381,34 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\    return
         \\  end
         \\
-        \\  -- Playing. The direction is still held, so the pose machine has to
-        \\  -- move her -- which is what says the cart reached the game rather
-        \\  -- than a state that merely stopped being pose ${X:0>2}.
-        \\  if rd16(RAM_SAMX, wram) ~= startX then emu.stop(0) end
-        \\  if since > 120 then emu.stop(149) end
+        \\  if phase == 5 then
+        \\    -- Playing. The direction is still held, so the pose machine has to
+        \\    -- move her -- which is what says the cart reached the game rather
+        \\    -- than a state that merely stopped being pose ${X:0>2}.
+        \\    if rd16(RAM_SAMX, wram) ~= startX then
+        \\      hold, phase, since = nil, 6, 0
+        \\      probePoke(PROBE.hud)
+        \\      return
+        \\    end
+        \\    if since > 120 then emu.stop(149) end
+        \\    return
+        \\  end
+        \\
+        \\  -- The frame drawn with the HUD's colours green, then the one with the
+        \\  -- play field's. Each palette reaches its own lines and no others.
+        \\  local bar, rest = probeGreen(emu.getScreenBuffer())
+        \\  if phase == 6 then
+        \\    probeRestore(PROBE.hud)
+        \\    if bar == 0 or rest ~= 0 then
+        \\      emu.stop(158)
+        \\      return
+        \\    end
+        \\    probePoke(PROBE.play)
+        \\    phase = 7
+        \\    return
+        \\  end
+        \\  probeRestore(PROBE.play)
+        \\  if rest == 0 or bar ~= 0 then emu.stop(159) else emu.stop(0) end
         \\end, emu.eventType.endFrame)
         \\
         \\emu.addEventCallback(function()

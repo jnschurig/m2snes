@@ -144,6 +144,11 @@ arch 65816
 !BG3SC_VALUE   = (!BG3_MAP>>10)<<2
 !BG2_MAP       = $0C00
 !BG2SC_VALUE   = (!BG2_MAP>>10)<<2
+; The window's BG2 palette, CGRAM $10-$13, so a colour scheme can give the HUD
+; colours of its own (`snes_target.hud_palette`). `!HUD_ATTR` is the high byte
+; of every window word: the palette, no priority, no flip.
+!HUD_PAL       = 1
+!HUD_ATTR      = !HUD_PAL<<2
 !BG12_CHAR_BASE = $1000
 ; BG34NBA: BG3 characters at word $0000.
 !BG34NBA_VALUE = $00
@@ -3531,6 +3536,8 @@ ConstCollBlobs = !COLL_BLOBS
 ; NMI drains 2 768 bytes and returns on line 253 of 261. The queue moved out of
 ; $07A1-$07CA, which is free now, to have the room.
 !XferEnd      = $07A0           ; bytes of `!XferQ` in use
+; Colour schemes: from $07A1 on.
+!HudAttr      = $07A1           ; the status bar's words' high byte (`BarPut`)
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -3980,6 +3987,7 @@ ConstBlkEvictX   = !BLK_EVICT_X
 ConstBlkSize     = !BLK_SIZE
 ConstBlkRespawnIds = !BLK_RESPAWN_IDS
 ConstPlayPri     = !PLAY_PRI
+ConstHudPal      = !HUD_PAL
 VarScreenPri     = !ScreenPri
 
 VarItemStage     = !ItemStage
@@ -4369,7 +4377,7 @@ Reset:
         jsr ClearVideoMemory
         jsr ApplySetup
         jsr InitHdma
-        jsr LoadPalette
+        jsl LoadPalette         ; bank 1
         ; **`InitOam` moved in front of `InitState` in Step 7**, because the
         ; title screen is shown between them and a screen with 128 unparked
         ; sprites on it is a screen with a row of stray tiles across the top.
@@ -5392,52 +5400,6 @@ assert !VIEW_H-!HUD_WY <= 127
 ; window must still need two play entries and one window entry.
 assert !HUD_WY_UP > 127 && !HUD_WY_UP < !HUD_WY
 ConstTmPlay   = !TM_PLAY
-
-; ---------------------------------------------------------------------------
-; BG3's palette 0, from the four colours the builder patched into `BootRecord`.
-;
-; Entry 0 is written even though the SNES treats a background colour 0 as
-; transparent, because entry 0 is also the backdrop - and on the Game Boy a
-; background pixel of index 0 is opaque and drawn with BGP's first field.
-; Writing the same colour into both is what makes the two agree.
-; ---------------------------------------------------------------------------
-LoadPalette:
-        sep #$20
-        stz !CGADD
-        ldx #$0000
--       lda BootPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0008
-        bne -
-        ; The object palettes. CGRAM's second half belongs to the sprites: the
-        ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
-        ; go into it and the one after. Entry 0 of each is written and never
-        ; seen - a sprite pixel of colour 0 is transparent - which is the one
-        ; place where the SNES and the Game Boy agree without being made to.
-        ;
-        ; **An object palette is sixteen colours**, so the one after is colour
-        ; $90, which is what `PutObject`'s palette 1 reads. Until 1.0 Step 8b's
-        ; playtest OBP1 went to $84, straight after OBP0's four, and palette 1
-        ; was black: a frozen enemy, a stunned one's flash and a blinking drop
-        ; drew black on the black play field. `snes boot` code 15 reads $90.
-        lda.b #$80
-        sta !CGADD
-        ldx #$0000
--       lda BootObjPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0008
-        bne -
-.obp1                                   ; the warp rung's `refills` fault patches this
-        lda.b #$90
-        sta !CGADD
--       lda BootObjPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0010
-        bne -
-        rts
 
 ; ---------------------------------------------------------------------------
 ; Park every OAM slot off-screen.
@@ -23188,12 +23150,24 @@ LoadHud:
         rep #$30
         rts
 
-; One window tile id as a BG2 tilemap word: character `id`, palette 0, no
-; priority, no flip. The Game Boy's window has none of those bits to carry.
-; in: 8-bit A, VMADD already pointed. Preserves X and Y.
+; One window tile id as a BG2 tilemap word: character `id`, `!HUD_ATTR` (the
+; HUD's palette, no priority, no flip). The Game Boy's window has none of those
+; bits to carry. `snes_target.windowWord` is the same word.
+; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
 HudPut:
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.b #!HUD_ATTR
+        sta !VMDATAL+1
+        rts
+
+; The status bar's cell: `HudPut`, but with `!HudAttr`'s high byte, which
+; `UpdateStatusBar` sets with `!HudBase`. In the Queen's room the bar is a row
+; of BG3's (`vramDest_queenStatusBar`), which is the play field's palette 0.
+; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
+BarPut:
+        sta !VMDATAL
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rts
 
 ; ---------------------------------------------------------------------------
@@ -23263,12 +23237,12 @@ HudTens:
         lsr a
         clc
         adc.b #!HUD_DIGIT
-        jmp HudPut
+        jmp BarPut
 HudOnes:
         and.b #$0F
         clc
         adc.b #!HUD_DIGIT
-        jmp HudPut
+        jmp BarPut
 
 ; ---------------------------------------------------------------------------
 ; The Game Boy's `DAA` after an addition, exactly: +$60 on a carry or above $99,
@@ -23384,13 +23358,19 @@ UpdateStatusBar:
         ; $497D-$498B: the Queen room's background row, or the window's (1.0
         ; Step 6). Outside her room the Game Boy rewrites `rWX` to 7 here,
         ; which is BG2's scroll, `QueenNmi`'s to put back.
+        ; And the words' high byte with it: the play field's palette on BG3,
+        ; the HUD's on BG2 (`BarPut`).
         rep #$20
         lda.w #!BG3_MAP+!QUEEN_BAR_ROW  ; $497D `vramDest_queenStatusBar`
         sta.w !HudBase
         sep #$20
+        stz.w !HudAttr
         lda !RoomMode
         cmp.b #!QUEEN_ROOM      ; $4983
         beq +
+.hudAttr                                ; the cold boot rung's fault patches this
+        lda.b #!HUD_ATTR
+        sta.w !HudAttr
         rep #$20
         lda.w #!BG2_MAP         ; $498B `vramDest_statusBar`
         sta.w !HudBase
@@ -23403,11 +23383,11 @@ UpdateStatusBar:
         sep #$20
         ldx.w #!HUD_TANKS-1
 -       lda.w !HudTanks,x       ; $498E: tank 5 is the leftmost cell
-        jsr HudPut
+        jsr BarPut
         dex
         bpl -
         lda.b #!HUD_DASH        ; $499D
-        jsr HudPut
+        jsr BarPut
         lda.w !DispHealthLo     ; $49A0
         jsr HudTens
         lda.w !DispHealthLo     ; $49AA
@@ -27621,7 +27601,8 @@ PauseShow:
 ; ---------------------------------------------------------------------------
 ; 01:$4A0F, `VBlank_updateStatusBar`'s paused arm: the L counter over the count,
 ; or two dashes for $FF. In NMI, with VMADDR already on the count's cell.
-; `HudTens` and `HudOnes` in bank 0 are two stores each, and here they are too.
+; `HudTens` and `HudOnes` in bank 0 are `BarPut`'s stores, and here they are
+; too, with the high byte `UpdateStatusBar` left in `!HudAttr`.
 ; ---------------------------------------------------------------------------
 StatusBarLCounter:
         sep #$20
@@ -27636,20 +27617,25 @@ StatusBarLCounter:
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         lda.w !LCounter                 ; $4A1D: the ones
         and.b #$0F
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rtl
 .dashes
         lda.b #!HUD_DASH                ; $4A26
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
+        lda.b #!HUD_DASH
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rtl
 
 ; ---------------------------------------------------------------------------
@@ -27947,7 +27933,8 @@ HudBaseNmi:
         ldx.w #$0000
 -       lda.w !HudBaseBuf,x
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.b #!HUD_ATTR
+        sta !VMDATAL+1
         inx
         cpx.w #!HUD_CELLS
         bne -
@@ -30718,8 +30705,9 @@ QueenDrawHead:
         lda.b #$06                      ; $703D: six cells
         sta.w !QnRun
 -       lda.w !QueenFrames,x            ; $703F
-        sta !VMDATAL                    ; a window word: the id, and nothing else
-        stz !VMDATAH
+        sta !VMDATAL                    ; a window word: the id, and `!HUD_ATTR`
+        lda.b #!HUD_ATTR
+        sta !VMDATAH
         inx
         dec.w !QnRun
         bne -
@@ -31158,6 +31146,67 @@ UploadSamusBgTwin:
         plp
         rtl
 
+; ---------------------------------------------------------------------------
+; The palettes, from the colours the builder patched into `BootRecord`: BG3's
+; palette 0, the window's and the two objects'.
+;
+; Entry 0 is written even though the SNES treats a background colour 0 as
+; transparent, because entry 0 is also the backdrop - and on the Game Boy a
+; background pixel of index 0 is opaque and drawn with BGP's first field.
+; Writing the same colour into both is what makes the two agree.
+;
+; In bank 1 since colour schemes Step 3, read long, to make room in bank 0:
+; `Reset` calls it once.
+; ---------------------------------------------------------------------------
+LoadPalette:
+        sep #$20
+        stz !CGADD
+        ldx #$0000
+-       lda.l BootPalette,x
+        sta !CGDATA
+        inx
+        cpx #$0008
+        bne -
+        ; The window's, BG2 palette `!HUD_PAL`: the same four until a colour
+        ; scheme gives the HUD its own. Entry 0 is BG2's transparent colour,
+        ; written for the same reason the objects' is.
+        lda.b #!HUD_PAL<<4
+        sta !CGADD
+        ldx #$0000
+-       lda.l BootPalette,x
+        sta !CGDATA
+        inx
+        cpx #$0008
+        bne -
+        ; The object palettes. CGRAM's second half belongs to the sprites: the
+        ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
+        ; go into it and the one after. Entry 0 of each is written and never
+        ; seen - a sprite pixel of colour 0 is transparent - which is the one
+        ; place where the SNES and the Game Boy agree without being made to.
+        ;
+        ; **An object palette is sixteen colours**, so the one after is colour
+        ; $90, which is what `PutObject`'s palette 1 reads. Until 1.0 Step 8b's
+        ; playtest OBP1 went to $84, straight after OBP0's four, and palette 1
+        ; was black: a frozen enemy, a stunned one's flash and a blinking drop
+        ; drew black on the black play field. `snes boot` code 15 reads $90.
+        lda.b #$80
+        sta !CGADD
+        ldx #$0000
+-       lda.l BootObjPalette,x
+        sta !CGDATA
+        inx
+        cpx #$0008
+        bne -
+.obp1                                   ; the warp rung's `refills` fault patches this
+        lda.b #$90
+        sta !CGADD
+-       lda.l BootObjPalette,x
+        sta !CGDATA
+        inx
+        cpx #$0010
+        bne -
+        rtl
+
 ; The window's map to $FF, as `bootRoutine`'s `clearTilemaps` (00:$01FB) and
 ; `gameMode_dead`'s leave the Game Boy's $9C00: the rows the status bar, the
 ; save text and the Queen's head do not write. $FF is `gfx_commonItems`' last
@@ -31172,7 +31221,7 @@ ClearWindowMap:
         lda.w #!BG2_MAP
         sta !VMADDL
         ldx.w #$0400
-        lda.w #$00FF
+        lda.w #(!HUD_ATTR<<8)|$FF
 -       sta !VMDATAL
         dex
         bne -

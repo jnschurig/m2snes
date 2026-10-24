@@ -29,6 +29,7 @@ const snes_trace = @import("snes_trace.zig");
 const inject = @import("snes_inject.zig");
 const convert = @import("snes_convert.zig");
 const gb_trace = @import("gb_trace.zig");
+const target = @import("snes_target.zig");
 
 pub const Error = error{ NeverSettled, MissingSymbol, NoSaveFile, ShortSaveFile, NotTheImage, NoBoot, OutOfMemory };
 
@@ -217,12 +218,15 @@ pub fn script(allocator: std.mem.Allocator) !Script {
 // ---- What is recorded ------------------------------------------------------
 
 /// After every tick: the twenty tile ids, the OR of the twenty words' high
-/// bytes (zero on the Game Boy, which has no attribute to carry), both
+/// bytes (the Game Boy has no attribute to carry, so its record holds
+/// `window_attr`, the byte `target.windowWord` gives every window word), both
 /// displayed counts, the shuffle timer and the real health's low byte, which
 /// the clamp rewrites.
 pub const record_bytes: usize = status_tiles + 11;
 pub const Record = [record_bytes]u8;
 pub const at_attr: usize = status_tiles;
+/// The high byte of every window word, the palette `target.hud_palette`.
+pub const window_attr: u8 = @truncate(@as(u16, @bitCast(target.windowWord(0))) >> 8);
 pub const at_disp_health: usize = status_tiles + 1;
 pub const at_disp_missiles: usize = status_tiles + 3;
 pub const at_shuffle: usize = status_tiles + 5;
@@ -297,7 +301,7 @@ pub fn runGb(allocator: std.mem.Allocator, rom: []const u8, s: Script) !GbRun {
         }
         try oracle.stepOneTick(&m, oracle.gbKeys(s.keys[tick]));
         @memcpy(r[0..status_tiles], m.sys.bus.vram[gb_status_bar_vram..][0..status_tiles]);
-        r[at_attr] = 0;
+        r[at_attr] = window_attr;
         r[at_disp_health] = m.read(gb_disp_health);
         r[at_disp_health + 1] = m.read(gb_disp_health + 1);
         r[at_disp_missiles] = m.read(gb_disp_missiles);
