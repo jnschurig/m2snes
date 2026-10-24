@@ -368,6 +368,17 @@ pub fn build(b: *std.Build) void {
     warp_grade_mod.addImport("png", png_mod);
     addEngine(b, warp_grade_mod);
 
+    // Colour schemes Step 6: the `schemes` rung's scripts.
+    const scheme_grade_mod = b.createModule(.{
+        .root_source_file = b.path("src/scheme_grade.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scheme_grade_mod.addOptions("build_options", options);
+    scheme_grade_mod.addImport("testrom", testrom_mod);
+    scheme_grade_mod.addImport("png", png_mod);
+    addEngine(b, scheme_grade_mod);
+
     // The residue audit: what the opening leaves behind, and whether we read it.
     const residue_mod = b.createModule(.{
         .root_source_file = b.path("src/residue.zig"),
@@ -797,7 +808,7 @@ pub fn build(b: *std.Build) void {
         run.step.dependOn(&crawl_run.step);
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod }) |mod| {
+    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod }) |mod| {
         // Separate from the list above only because these need the working
         // directory set: both find the retail ROM by relative path.
         addAudio(b, mod);

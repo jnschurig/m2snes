@@ -72,6 +72,16 @@ pub fn tables(scheme: Scheme) Tables {
 /// How many schemes the cart carries: every id below this is valid.
 pub const count: u8 = @typeInfo(Scheme).@"enum".fields.len;
 
+/// Where cartridge RAM keeps each slot's scheme (colour schemes Step 6): the
+/// magic, then one id a slot. Past the spawn flags, in the part of the Game
+/// Boy's $A000-$BFFF the game never touches (`save.spawn_end`).
+pub const sram_at: u16 = 0x1600;
+pub const sram_magic = [4]u8{ 'M', '2', 'C', 'S' };
+/// The SRAM bytes a slot's id is at.
+pub fn sramSlot(slot: u8) u16 {
+    return sram_at + @as(u16, sram_magic.len) + slot;
+}
+
 /// One table seen through a DMG palette register: entry `i` is the colour of
 /// the shade the register's field `i` names.
 pub fn apply(table: Table, reg: u8) Table {

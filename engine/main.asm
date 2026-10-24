@@ -2939,6 +2939,11 @@ ConstBlobMovesGb    = !BLOB_MOVES_GB
 ; `!ActiveSlot` picks one, through `!SlotP`.
 !SRAM         = $700000
 !SRAM_SPAWN   = $701000
+; Colour schemes Step 6: past the spawn flags, in the Game Boy's free $B600-$BFFF,
+; `SchemeMagic` and then one scheme id a slot (`colors.sram_at`). The title reads
+; a slot's id only while the slot holds a game, and checks it against `!SCHEMES`.
+!SRAM_SCHEME  = $701600
+!SCHEME_MAGIC_LEN = 4
 !SAVE_MAGIC_LEN = 8
 !SAVE_COOLDOWN = $FF            ; 01:$583E
 !SAVE_TEXT_Y  = $98             ; 01:$5849 and $5864
@@ -3547,6 +3552,9 @@ ConstCollBlobs = !COLL_BLOBS
 ; Colour schemes: from $07A1 on.
 !HudAttr      = $07A1           ; the status bar's words' high byte (`BarPut`)
 !Scheme       = $07A2           ; the active colour scheme's id (`LoadPalette`)
+!SchemeDue    = $07A3           ; NMI owes CGRAM the scheme's words (`SchemeNmi`)
+!SchemeSlot   = $07A4           ; the slot the title last loaded a scheme for
+!SlotGame     = $07A5           ; 3: nonzero while the slot holds a game (`SlotIsGame`)
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -4000,6 +4008,8 @@ ConstHudPal      = !HUD_PAL
 ConstSchemes     = !SCHEMES
 ConstDefaultScheme = !DEFAULT_SCHEME
 ConstSchemeWords = !SCHEME_WORDS
+ConstSramScheme  = !SRAM_SCHEME&$FFFF
+ConstSchemeMagicLen = !SCHEME_MAGIC_LEN
 VarScheme        = !Scheme
 VarScreenPri     = !ScreenPri
 
@@ -5620,6 +5630,7 @@ TitleScreen:
 +       jsr UploadTitleChr
         jsl TitleResolve        ; the credits set, for the menu (bank 1)
         jsl TitleSeedSlot       ; `bootRoutine`'s slot (Step 24i, bank 1)
+        jsl TitleSchemeSeed     ; and its colour scheme, in CGRAM (colour schemes Step 6)
         jsl UploadTitleArt      ; "Super", and BG1 on the play band (Step 24j)
 
 ; ---- The tilemap ----------------------------------------------------------
@@ -5768,6 +5779,7 @@ TitleFrame:
         eor.b #$FF              ; $41E0 `XOR $FF`
         sta.w !TitleShowClear
 +       jsl TitleSlotStep       ; $41E5-$4223, Right and Left, in bank 1
+        jsl TitleSchemeStep     ; L, and the slot's scheme (colour schemes Step 6)
 
         ; $4226-$4243: clear is selected for as long as Down is held with the
         ; option shown. `BIT 7` of the held byte: a mask, so Down with another
@@ -5827,6 +5839,7 @@ TitleFrame:
         sta.l !SRAM,x           ; $42BD `LD (HL+),A`
         sta.l !SRAM+1,x         ; $42BE `LD (HL),A`
         stz.w !TitleShowClear   ; $42C3
+        jsl TitleSchemeClear    ; an empty slot shows the default (colour schemes Step 6)
         rep #$30
         clc
         rts
@@ -5839,20 +5852,10 @@ TitleFrame:
 ; is not recorded in `!Song`, and should not be: `!Song` is `currentRoomSong`,
 ; and the fanfare is what the title asks for once, not what the room asks for.
 ;
-; **The slot check is ported as it is, which is broken.** $426D-$4281 walk the
-; ROM from `saveFile_magicNumber` (00:$2083) and the slot together until a byte
-; differs, and then test the *ROM's* byte against $08 rather than counting what
-; matched. A slot is a game when the first byte that differs sits at or above
-; $08 in the ROM. A blank slot differs at once, on the magic's $01, and is not.
-; A real one matches all eight and runs on into `samus_damagePoseTable` and
-; `spiderDirectionTable`, which follow the magic in bank 0, until the record
-; stops agreeing with them -- usually on its first byte, against a table byte of
-; $0F. So a record whose bytes happen to match those tables for a while can come
-; out as no game at all, and so it does here.
-;
-; The walk stops at the end of the spider table, 102 bytes in, where the
-; Game Boy's would carry on. Only a slot that matched the ROM for all 102 could
-; tell.
+; The slot check is `SlotIsGame`'s, in bank 1 since colour schemes Step 6 so
+; the title can ask it of every slot; it is broken, and ported as it is. Start
+; also keeps the scheme the title shows for the slot (`SchemeStore`), which is
+; how an empty slot's first game gets one.
 ; ---------------------------------------------------------------------------
 TitleStart:
         sep #$20
@@ -5862,69 +5865,12 @@ TitleStart:
         %audio_put(!REQ_SFX_SQUARE1, $05425C)
         %audio_request(!REQ_SONG, $12, $054261)
         stz !LoadingFromFile    ; $4264
-        ; The two tables after the magic, in the ROM's order.
-        lda.b #!CLASS_PHYSICS
-        sta !ArgClass
-        lda.b #!PHYS_SPIDER_DIRS
-        sta !ArgId
-        jsr FindBlob
-        bcs +
-        jmp Fatal
-+       rep #$20
-        lda !Blob
-        sta !TabP
-        lda !BlobLen
-        sta.w !LoadIdx
-        sep #$20
-        lda !Blob+2
-        sta !TabP+2
-        lda.b #!PHYS_DMG_POSE
-        sta !ArgId
-        jsr FindBlob            ; and `!Blob` is the damage table from here
-        bcs +
-        jmp Fatal
-+       sep #$20                ; `FindBlob` returns wide
-        jsl SlotRecP            ; $4270-$427A: the slot's record, as `[!SlotP]`
-        ldx.w #$0000
-.byte
-        cpx.w #!SAVE_MAGIC_LEN
-        bcs .tables
-        lda.l SaveMagic,x
-        bra .have
-.tables
-        rep #$20
-        txa
-        sec
-        sbc.w #!SAVE_MAGIC_LEN
-        cmp !BlobLen
-        bcs .spider
-        tay
-        sep #$20
-        lda [!Blob],y
-        bra .have
-.spider
-        sbc !BlobLen            ; the carry is set
-        cmp.w !LoadIdx
-        bcs .ranOut
-        tay
-        sep #$20
-        lda [!TabP],y
-.have
-        sta !Tmp                ; $427D `LD B,A`
-        txy
-        cmp [!SlotP],y          ; $427E-$4280
-        bne .differs
-        inx
-        bra .byte
-.ranOut
-        sep #$20
-.differs
-        lda !Tmp                ; $4283 `LD A,B`
-        cmp.b #$08              ; $4284
+        jsl SlotIsGame          ; $426D-$4281, in bank 1 (colour schemes Step 6)
         bcc +
         lda.b #$FF
         sta !LoadingFromFile    ; $428A
-+       lda.w !ActiveSlot       ; $428D `activeSaveSlot`
++       jsl SchemeStore         ; the scheme the title shows, kept for the slot
+        lda.w !ActiveSlot       ; $428D `activeSaveSlot`
         sta.l !SRAM_COUNTER     ; $4290
         rep #$30
         rts
@@ -13146,6 +13092,7 @@ NMI:
         jsr WriteWindow
         jsl QueenNmi            ; 1.0 Step 6, bank 1: her head, and the bands `QueenPass` built
 .readout
+        jsl SchemeNmi           ; the title's recolour (colour schemes Step 6, bank 1)
         sep #$20
         lda.w !ReadoutFontDue
         rep #$30
@@ -25338,6 +25285,269 @@ SlotSpawnP:
         pla
         plp
         rtl
+
+; ---------------------------------------------------------------------------
+; 05:$426D-$4281, `TitleStart`'s check of the selected slot, on its own since
+; colour schemes Step 6 so the title can ask it of each slot. Carry set when
+; the slot holds a game. Writes scratch only (`!Blob`, `!TabP`, `!LoadIdx`,
+; `!Tmp`, `!SlotP`), so it runs with NMI off. Any widths; keeps them.
+;
+; **The slot check is ported as it is, which is broken.** $426D-$4281 walk the
+; ROM from `saveFile_magicNumber` (00:$2083) and the slot together until a byte
+; differs, and then test the *ROM's* byte against $08 rather than counting what
+; matched. A slot is a game when the first byte that differs sits at or above
+; $08 in the ROM. A blank slot differs at once, on the magic's $01, and is not.
+; A real one matches all eight and runs on into `samus_damagePoseTable` and
+; `spiderDirectionTable`, which follow the magic in bank 0, until the record
+; stops agreeing with them -- usually on its first byte, against a table byte of
+; $0F. So a record whose bytes happen to match those tables for a while can come
+; out as no game at all, and so it does here.
+;
+; The walk stops at the end of the spider table, 102 bytes in, where the
+; Game Boy's would carry on. Only a slot that matched the ROM for all 102 could
+; tell.
+; ---------------------------------------------------------------------------
+SlotIsGame:
+        php
+        sep #$20
+        rep #$10
+        ; The two tables after the magic, in the ROM's order.
+        lda.b #!CLASS_PHYSICS
+        sta !ArgClass
+        lda.b #!PHYS_SPIDER_DIRS
+        sta !ArgId
+        jsl FindBlobLong
+        bcs +
+        jml Fatal
++       rep #$20
+        lda !Blob
+        sta !TabP
+        lda !BlobLen
+        sta.w !LoadIdx
+        sep #$20
+        lda !Blob+2
+        sta !TabP+2
+        lda.b #!PHYS_DMG_POSE
+        sta !ArgId
+        jsl FindBlobLong        ; and `!Blob` is the damage table from here
+        bcs +
+        jml Fatal
++       sep #$20                ; `FindBlob` returns wide
+        jsl SlotRecP            ; $4270-$427A: the slot's record, as `[!SlotP]`
+        ldx.w #$0000
+.byte
+        cpx.w #!SAVE_MAGIC_LEN
+        bcs .tables
+        lda.l SaveMagic,x
+        bra .have
+.tables
+        rep #$20
+        txa
+        sec
+        sbc.w #!SAVE_MAGIC_LEN
+        cmp !BlobLen
+        bcs .spider
+        tay
+        sep #$20
+        lda [!Blob],y
+        bra .have
+.spider
+        sbc !BlobLen            ; the carry is set
+        cmp.w !LoadIdx
+        bcs .ranOut
+        tay
+        sep #$20
+        lda [!TabP],y
+.have
+        sta !Tmp                ; $427D `LD B,A`
+        txy
+        cmp [!SlotP],y          ; $427E-$4280
+        bne .differs
+        inx
+        bra .byte
+.ranOut
+        sep #$20
+.differs
+        lda !Tmp                ; $4283 `LD A,B`
+        cmp.b #$08              ; $4284
+        bcc .no
+        plp
+        sec
+        rtl
+.no
+        plp
+        clc
+        rtl
+
+; ---------------------------------------------------------------------------
+; Colour schemes Step 6: the title's scheme. Each slot keeps its own in SRAM
+; (`!SRAM_SCHEME`), read only while the slot holds a game: an empty slot shows
+; the default, and L there changes what is shown until the slot changes or
+; Start keeps it. L steps the scheme; on a slot holding a game it is kept at
+; once, so it survives a power-off before the next save.
+;
+; Which slots hold a game is asked once, at the title's setup, with NMI off as
+; `SlotIsGame` needs, and kept in `!SlotGame`. Only the clear changes the
+; answer while the title is up. A recolour once the screen is on goes through
+; `!SchemeDue`, and NMI loads it in vblank.
+; ---------------------------------------------------------------------------
+
+; From `TitleScreen`, in forced blank with NMI off: every slot asked, and the
+; selected one's scheme loaded. Any widths; keeps them.
+TitleSchemeSeed:
+        php
+        sep #$30
+        lda.w !ActiveSlot
+        pha
+        lda.b #!SLOT_LAST
+.slot
+        sta.w !ActiveSlot       ; `SlotIsGame` asks the selected slot
+        jsl SlotIsGame
+        lda.b #$00
+        rol a
+        ldx.w !ActiveSlot
+        sta.w !SlotGame,x
+        dex
+        txa
+        bpl .slot
+        pla
+        sta.w !ActiveSlot
+        sta.w !SchemeSlot
+        jsr SlotScheme
+        sta.w !Scheme
+        jsl LoadPalette
+        plp
+        rtl
+
+; One title frame's, after Right and Left: the slot's scheme when the slot
+; moved, then L alone on its edge. Any widths; keeps them.
+TitleSchemeStep:
+        php
+        sep #$30
+        lda.w !ActiveSlot
+        cmp.w !SchemeSlot
+        beq .l
+        sta.w !SchemeSlot
+        jsr SlotScheme
+        sta.w !Scheme
+        jsl SchemeLater
+.l
+        rep #$20
+        lda !InputRisingEdge
+        cmp.w #!PAD_L
+        bne .out
+        sep #$20
+        lda.w !Scheme
+        inc a
+        cmp.b #!SCHEMES
+        bcc +
+        lda.b #$00
++       sta.w !Scheme
+        jsl SchemeLater
+        ldx.w !ActiveSlot
+        lda.w !SlotGame,x
+        beq .out
+.keep                                   ; the `schemes` rung's fault patches this
+        jsl SchemeStore
+.out
+        plp
+        rtl
+
+; The clear (05:$42A6) has emptied the slot, so it shows the default. Any
+; widths; keeps them.
+TitleSchemeClear:
+        php
+        sep #$30
+        ldx.w !ActiveSlot
+        stz.w !SlotGame,x
+        lda.b #!DEFAULT_SCHEME
+        sta.w !Scheme
+        jsl SchemeLater
+        plp
+        rtl
+
+; The scheme a slot plays in: its SRAM id when the slot holds a game, the
+; magic is there and the id names a scheme this cart has, and otherwise the
+; default. An id is never used unchecked, so a save from a cart with more
+; schemes, or a corrupt one, plays in the default.
+; in: A the slot. out: A the scheme. A and the index 8-bit.
+SlotScheme:
+        tay
+        lda.w !SlotGame,y
+        beq .default
+        jsr SchemeMagicOk
+        bcc .default
+        tyx
+        lda.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        cmp.b #!SCHEMES
+.bound                                  ; the `schemes` rung's fault patches this
+        bcc +
+.default
+        lda.b #!DEFAULT_SCHEME
++       rts
+
+; Carry set when SRAM holds `SchemeMagic`. A and the index 8-bit.
+SchemeMagicOk:
+        ldx.b #!SCHEME_MAGIC_LEN-1
+-       lda.l !SRAM_SCHEME,x
+        cmp.l SchemeMagic,x
+        bne .bad
+        dex
+        bpl -
+        sec
+        rts
+.bad                                    ; the `schemes` rung's fault patches this
+        clc
+        rts
+
+; `!Scheme` kept for the selected slot. The first write over SRAM without the
+; magic sets every slot's id to the default before the magic goes in, so what
+; was in SRAM before does not become another slot's scheme. From the title's L
+; and from `TitleStart`. Any widths; keeps them.
+SchemeStore:
+        php
+        sep #$30
+        jsr SchemeMagicOk
+        bcs .id
+        ldx.b #!SLOT_LAST
+        lda.b #!DEFAULT_SCHEME
+-       sta.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        dex
+        bpl -
+        ldx.b #!SCHEME_MAGIC_LEN-1
+-       lda.l SchemeMagic,x
+        sta.l !SRAM_SCHEME,x
+        dex
+        bpl -
+.id
+        ldx.w !ActiveSlot
+        lda.w !Scheme
+        sta.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        plp
+        rtl
+
+; NMI owes CGRAM the scheme in `!Scheme`. Any widths; keeps them.
+SchemeLater:
+        php
+        sep #$20
+        lda.b #$01
+        sta.w !SchemeDue
+        plp
+        rtl
+
+; From NMI, in vblank: the scheme `SchemeLater` asked for, into CGRAM.
+; Leaves A 8-bit.
+SchemeNmi:
+        sep #$20
+        lda.w !SchemeDue
+        beq +
+        stz.w !SchemeDue
+        jmp LoadPalette         ; whose `rtl` is this one's
++       rtl
+
+; `colors.sram_magic`: SRAM holds slot schemes.
+SchemeMagic:
+        db "M2CS"
 
 ; ---------------------------------------------------------------------------
 ; Step 24h. The draw half of `titleScreenRoutine` (05:4118): `TitleFrame`'s,

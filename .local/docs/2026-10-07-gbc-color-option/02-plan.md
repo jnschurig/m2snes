@@ -9,6 +9,7 @@ updated:
   - 2026-10-24T01:31:03Z
   - 2026-10-24T02:23:17Z
   - 2026-10-24T03:12:25Z
+  - 2026-10-24T04:43:43Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -222,17 +223,17 @@ tripwire for `full`.
     scenarios expecting `mono` exit 9. The crawl didn't move.
 
 - [ ] **Step 6: Per-slot schemes in SRAM, and L on the title (F2, F3)**
-  - [ ] SRAM layout at `$701F00` (free, past the spawn flags): a 4-byte
+  - [x] SRAM layout at `$701F00` (free, past the spawn flags): a 4-byte
         magic, then one scheme byte per slot. Add constants and a comment
         beside `!SRAM_SPAWN`, and teach `save.zig`'s layout the new region.
-  - [ ] Split the slot walk out of `TitleStart` into a side-effect-free
+  - [x] Split the slot walk out of `TitleStart` into a side-effect-free
         routine that returns "is a game" for a given slot. `TitleStart`
         calls it unchanged in behaviour, and the title rungs prove that.
         New code goes in bank 1, reached by `jsl` (bank 0 is nearly full).
-  - [ ] `SlotScheme(slot)`: if the slot is a game, the magic is good and the
+  - [x] `SlotScheme(slot)`: if the slot is a game, the magic is good and the
         byte is below `!SCHEMES`, return the byte. Otherwise return
         `!DEFAULT_SCHEME`. Never index the table with an unchecked byte.
-  - [ ] On the title:
+  - [x] On the title:
     - at setup (forced blank), load `SlotScheme(ActiveSlot)` directly;
     - in `TitleFrame` after `TitleSlotStep`, when the slot changes, set
       `!Scheme` to that slot's scheme and set `!SchemeDue`;
@@ -242,9 +243,9 @@ tripwire for `full`.
     - after a clear, `!Scheme` goes to the default;
     - Start writes the magic and the slot's byte (this covers an empty
       slot's first game).
-  - [ ] NMI: when `!SchemeDue` is set, `jsl` an upload of the 16 CGRAM
+  - [x] NMI: when `!SchemeDue` is set, `jsl` an upload of the 16 CGRAM
         words in vblank (the `!ReadoutFontDue` pattern).
-  - [ ] Rungs:
+  - [x] Rungs:
     - (a) L recolours CGRAM to `mono` and back;
     - (b) moving the slot recolours to that slot's scheme;
     - (c) a saved slot keeps `mono` across `Reboot` and a fresh power-on,
@@ -257,9 +258,25 @@ tripwire for `full`.
       blank;
     - (g) debug cart: choose `mono`, start, warp, and the scheme is kept;
     - (h) the title timing and TAS rungs are unchanged.
-  - [ ] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
+  - [x] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
         `crawl` if `zig build repin` shows it moved.
   - [ ] Commit, re-pin included.
+  - Done as: the region is at `$701600`, not `$701F00`, because the title
+    scripts write their fail frame at `$1F00`. It is `colors.sram_at`; `save.zig`
+    gains `spawn_end`, and a test keeps the region past it and below `$1F00`.
+    The magic is `M2CS` (`SchemeMagic`, checked against `colors.sram_magic`).
+    `SlotIsGame` is the walk moved whole to bank 1 (bank 0 got smaller).
+    `TitleSchemeSeed` asks it of every slot once, at setup with NMI off, and
+    keeps the answers in `!SlotGame` (`$07A5-$07A7`); only the clear changes
+    them while the title is up. `SchemeStore` writing over SRAM with no magic
+    sets all three ids to the default first, so earlier bytes don't become
+    another slot's scheme. The rung is `schemes` (`src/scheme_grade.zig`,
+    eight runs, 9/9 faults by run and code), and (g) is the `warp` rung's
+    `scheme` scenario (fault: L removed, 51). (c)'s reboot is the reset button
+    (`emu.reset()`), which reaches `Reset` as `Reboot` does, and its power-on
+    is the `power_on` run, from the bytes `keep` leaves. Also added: the `cleared`
+    run, the clear showing the default. `residue.zig` lists `TitleSchemeStep`
+    as a reader of `!InputRisingEdge`. The crawl didn't move.
 
 - [ ] **Step 7: The L badge in the bottom border (F2)**
   - [ ] Draft `assets/title_badge.png` in our own art: a 16×16 L-button

@@ -751,6 +751,10 @@ pub const Scenario = enum {
     /// Its explosion runs its four blasts with its record dead throughout, and
     /// it does not come back.
     missile_kill,
+    /// Colour schemes Step 6: L on the title picks `mono` before the new
+    /// game's Start, and play opens in it; a warp from the debug menu keeps
+    /// it, since a warp does not pass the title.
+    scheme,
 };
 
 /// The `missile_kill` scenario's two Metroids, as bank and spawn number.
@@ -798,6 +802,7 @@ pub fn scenarioCode(c: u8) []const u8 {
         48 => "the first Metroid never began its fight, or the menu's kill did not end it",
         49 => "the missiles never killed the second Metroid",
         50 => "the second Metroid's explosion was cut short: it came back, or its record left dead",
+        51 => "CGRAM is not the scheme L picked on the title, in play or after the warp",
         else => code(c),
     };
 }
@@ -992,6 +997,8 @@ pub fn writeRunner(w: *std.Io.Writer) !void {
         \\  if phase == 1 then
         \\    local fc = rd16(R.frames)
         \\    local p = {{}}
+        \\    -- Colour schemes Step 6: L before Start, for a script that sets it.
+        \\    if TITLE_L and fc + 1 == 2 then p.l = true end
         \\    if fc + 1 == 5 or fc + 1 == 6 then
         \\      p.start = true
         \\      starts = starts + 1
@@ -1223,6 +1230,35 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
         .refill_credits => try writeRefills(a, rom, sorted, mets, true, w),
         .spring_ball => try writeSpringBall(rom, sorted, w),
         .missile_kill => try writeMissileKill(sorted, mets, w),
+        .scheme => {
+            try w.print("TITLE_L = true\nMONO = {{", .{});
+            for (colors.cgramWords(.mono)) |word| try w.print(" {d},", .{word});
+            try w.print(
+                \\ }}
+                \\-- CGRAM's scheme words, as `LoadPalette` writes them: four runs of
+                \\-- four, at these colours.
+                \\local RUNS = {{ 0x00, 0x10, 0x80, 0x90 }}
+                \\local function mono(when)
+                \\  for r = 0, 3 do
+                \\    for i = 0, 3 do
+                \\      local c = (RUNS[r + 1] + i) * 2
+                \\      local got = emu.read(c, cgram) | (emu.read(c + 1, cgram) << 8)
+                \\      if got ~= MONO[r * 4 + i + 1] then
+                \\        fail(51, string.format("%s: CGRAM colour %02x is %04x, mono's %04x", when, RUNS[r + 1] + i, got, MONO[r * 4 + i + 1]))
+                \\      end
+                \\    end
+                \\  end
+                \\end
+                \\local function main()
+                \\  mono("in play")
+                \\  warp(0, 0); wait(10)
+                \\  mono("after the warp")
+                \\  print("mono, picked with L on the title, in play and through a warp")
+                \\  emu.stop(0)
+                \\end
+                \\
+            , .{});
+        },
     }
 
     try writeRunner(w);

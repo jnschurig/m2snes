@@ -51,6 +51,7 @@ const audio_level = @import("audio_level.zig");
 const audio_level_run = if (build_options.have_sameboy) @import("audio_level_run.zig") else struct {};
 const colors = @import("colors.zig");
 const gbc_oracle = @import("gbc_oracle.zig");
+const scheme_grade = @import("scheme_grade.zig");
 // Likewise: only a gate that links SameBoy can boot its CGB model.
 const gbc_oracle_run = if (build_options.have_sameboy) @import("gbc_oracle_run.zig") else struct {};
 
@@ -1374,6 +1375,91 @@ pub fn main(init: std.process.Init) !void {
         }
     } else {
         try out.print("skip  title             needs the ROM\n", .{});
+    }
+
+    // ---- With a ROM and an emulator: does each slot keep its scheme? -------
+    //
+    // Colour schemes Step 6. The shipped cart's title with each slot's scheme
+    // in SRAM, driven with L, Right, Left, the clear, the reset button and
+    // Start (`scheme_grade.zig`): CGRAM holds the scheme each step should
+    // show, SRAM keeps what each step should keep, and every CGRAM write lands
+    // in forced blank or vblank. Then each new routine taken out is caught by
+    // the run and the code that grade it.
+    if (rom_bytes) |bytes| {
+        var set = try snes_convert.run(arena, bytes);
+        defer set.deinit();
+        const boot = try snes_screen.newGameBoot(arena, bytes);
+        var diag: snes_inject.Diagnosis = .{};
+        var rom = try snes_inject.build(arena, set, boot, &diag);
+        defer rom.deinit();
+
+        const runs = comptime std.enums.values(scheme_grade.Run);
+        var jobs: [runs.len + scheme_faults.len]ScenarioJob = undefined;
+        for (runs, 0..) |r, i| {
+            var lua: std.Io.Writer.Allocating = .init(arena);
+            try scheme_grade.writeLua(bytes, r, &lua.writer);
+            jobs[i] = .{ .name = @tagName(r), .rom = rom.bytes, .lua = lua.written() };
+        }
+        var placed = true;
+        for (scheme_faults, 0..) |f, i| {
+            const at = snes_inject.symbolOffset(f.label) orelse {
+                placed = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} is not in the engine image\n", .{f.label});
+                jobs[runs.len + i] = .{ .name = f.label, .rom = rom.bytes, .lua = "" };
+                continue;
+            };
+            var jml: [4]u8 = undefined;
+            const patch = if (f.patch.len > 0) f.patch else blk: {
+                // `jml LoadPalette`: the recolour straight away, not in vblank.
+                const lp = snes_inject.symbol("LoadPalette") orelse return error.MissingSymbol;
+                jml = .{ 0x5C, @truncate(lp), @truncate(lp >> 8), @truncate(lp >> 16) };
+                break :blk &jml;
+            };
+            if (std.mem.eql(u8, rom.bytes[at..][0..patch.len], patch)) {
+                placed = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} already holds the patch: the cart is not faulted\n", .{f.label});
+            }
+            const fb = try arena.dupe(u8, rom.bytes);
+            @memcpy(fb[at..][0..patch.len], patch);
+            jobs[runs.len + i] = .{ .name = f.label, .rom = fb, .lua = jobs[@intFromEnum(f.run)].lua };
+        }
+        var got: [jobs.len]?ScenarioGot = @splat(null);
+        try scenarioRuns(arena, init.io, &jobs, &got);
+        if (got[0] == null) {
+            try out.print("ok    schemes           not run: no emulator (set MESEN, see docs/setup.md)\n", .{});
+        } else {
+            var all = placed;
+            for (runs, got[0..runs.len]) |r, g| {
+                if (g.?.code == 0) continue;
+                all = false;
+                failures += 1;
+                try out.print("FAIL  schemes           {s}: exit {d} ({s})\n", .{ @tagName(r), g.?.code, scheme_grade.code(g.?.code) });
+                if (g.?.line.len > 0) try out.print("      {s}\n", .{g.?.line});
+            }
+            for (scheme_faults, got[runs.len..]) |f, g| {
+                const c = if (g) |x| x.code else continue;
+                if (c == f.want) continue;
+                all = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} taken out on {s}: exit {d} ({s}), wanted {d}\n", .{ f.label, @tagName(f.run), c, scheme_grade.code(c), f.want });
+                if (g.?.line.len > 0) try out.print("      {s}\n", .{g.?.line});
+            }
+            if (all) {
+                try out.print("ok    schemes           each slot's colour scheme on the title, over {d} runs\n", .{runs.len});
+                try out.print("      L                 recolours the title to the next scheme and back, at once\n", .{});
+                try out.print("      the slots         each shows its own scheme; an empty slot's byte is not read\n", .{});
+                try out.print("      kept              L on a game keeps it in SRAM at once, through the reset button and a power-on\n", .{});
+                try out.print("      empty slot        L's choice gone on moving away; Start plays in it and keeps it\n", .{});
+                try out.print("      the clear         the emptied slot shows the default\n", .{});
+                try out.print("      bad bytes         a bad magic, $FF and an id past the cart's schemes play in the default\n", .{});
+                try out.print("      vblank            every CGRAM write in forced blank or vblank\n", .{});
+                try out.print("      fault sweep       {d}/{d} engine faults caught by their runs and codes\n", .{ scheme_faults.len, scheme_faults.len });
+            }
+        }
+    } else {
+        try out.print("skip  schemes           needs the ROM\n", .{});
     }
 
     // ---- With a ROM and an emulator: is the pause the Game Boy's? -----------
@@ -3249,6 +3335,31 @@ fn scenarioRuns(arena: std.mem.Allocator, io: std.Io, jobs: []const ScenarioJob,
 
 /// The scenario rung's faults: a byte of the menu changed, caught by the check
 /// of the edit that uses it.
+/// The `schemes` rung's faults, colour schemes Step 6: each new routine taken
+/// out of the image the clean runs pass, on the run that grades it. An empty
+/// patch is `jml LoadPalette`, placed by the rung.
+const SchemeFault = struct { label: []const u8, patch: []const u8, run: scheme_grade.Run, want: u8 };
+const scheme_faults = [_]SchemeFault{
+    // No seed (`rtl`): the title opens on the default where slot 0 keeps `mono`.
+    .{ .label = "TitleSchemeSeed", .patch = &.{0x6B}, .run = .slot_move, .want = 10 },
+    // No step: L does nothing.
+    .{ .label = "TitleSchemeStep", .patch = &.{0x6B}, .run = .l_press, .want = 10 },
+    // L on a game shows the scheme and keeps nothing (`nop`s over the `jsl`).
+    .{ .label = "TitleSchemeStep_keep", .patch = &.{ 0xEA, 0xEA, 0xEA, 0xEA }, .run = .keep, .want = 11 },
+    // The id's bound gone (`bcc` to `bra`): `$FF` indexes past the table.
+    .{ .label = "SlotScheme_bound", .patch = &.{0x80}, .run = .bad_id, .want = 10 },
+    // A bad magic taken as good (`sec`).
+    .{ .label = "SchemeMagicOk_bad", .patch = &.{0x38}, .run = .bad_magic, .want = 10 },
+    // The recolour straight away rather than in vblank.
+    .{ .label = "SchemeLater", .patch = &.{}, .run = .l_press, .want = 12 },
+    // The clear leaves the slot's scheme up.
+    .{ .label = "TitleSchemeClear", .patch = &.{0x6B}, .run = .cleared, .want = 10 },
+    // Start keeps nothing, so an empty slot's first game has no scheme.
+    .{ .label = "SchemeStore", .patch = &.{0x6B}, .run = .empty_slot, .want = 11 },
+    // NMI never loads what the title asked for.
+    .{ .label = "SchemeNmi", .patch = &.{0x6B}, .run = .l_press, .want = 10 },
+};
+
 const ScenarioFault = struct { label: []const u8, offset: usize = 0, patch: []const u8, scenario: []const u8, want: u8 };
 const scenario_faults = [_]ScenarioFault{
     // Hi-jump's row (the second, four bytes a row) given the screw attack's
@@ -3306,6 +3417,9 @@ const warp_faults = [_]ScenarioFault{
     // (`ply` for `plx`), as before the step: the kill's pass runs on misaligned
     // slots and writes $FF over the explosion's counter.
     .{ .label = "EarthquakeCheck_out", .patch = &.{0x7A}, .scenario = "missile_kill", .want = 50 },
+    // Colour schemes Step 6: L on the title does nothing (`rtl`), so play
+    // opens in the default rather than the `mono` the scenario picked.
+    .{ .label = "TitleSchemeStep", .patch = &.{0x6B}, .scenario = "scheme", .want = 51 },
 };
 
 /// The pause rung's fault run, 1.0 Step 2a: each new routine, or the piece of

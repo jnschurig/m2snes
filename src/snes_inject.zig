@@ -1418,6 +1418,10 @@ test "the scheme table is colors.zig's, every scheme in id order" {
     try testing.expectEqual(@as(u32, @intFromEnum(colors.default_scheme)), symbol("ConstDefaultScheme").?);
     try testing.expectEqual(@as(u32, scheme_words), symbol("ConstSchemeWords").?);
     try testing.expectEqual(@as(usize, 16), scheme_words);
+    // Step 6: where SRAM keeps each slot's scheme, and the magic that says so.
+    try testing.expectEqual(@as(u32, colors.sram_at), symbol("ConstSramScheme").?);
+    try testing.expectEqual(@as(u32, colors.sram_magic.len), symbol("ConstSchemeMagicLen").?);
+    try testing.expectEqualSlices(u8, &colors.sram_magic, image[symbolOffset("SchemeMagic").?..][0..colors.sram_magic.len]);
 
     const gpa = testing.allocator;
     const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;

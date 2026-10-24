@@ -504,7 +504,7 @@ pub const fields = [_]Field{
         .define = "InputRisingEdge",
         .establishes = .zeroed,
         .carry = .scratch,
-        .reads = &.{ "DebugChord", "DebugFrame", "HandlePose", "MainLoop", "PausedFrame", "PoseBallFall", "PoseBallJump", "PoseCrouch", "PoseFall", "PoseHurt", "PoseInMouth", "PoseJump", "PoseMorph", "PoseMorphBombed", "PoseMorphHurt", "PoseRunning", "PoseSpider", "PoseSpiderFall", "PoseSpiderJump", "PoseSpiderRoll", "PoseSpinJump", "PoseStanding", "Readout", "SamusLayBomb", "SamusShoot", "SamusTryShooting", "SaveStation", "TitleFrame", "TitleSlotStep", "TryPausing" },
+        .reads = &.{ "DebugChord", "DebugFrame", "HandlePose", "MainLoop", "PausedFrame", "PoseBallFall", "PoseBallJump", "PoseCrouch", "PoseFall", "PoseHurt", "PoseInMouth", "PoseJump", "PoseMorph", "PoseMorphBombed", "PoseMorphHurt", "PoseRunning", "PoseSpider", "PoseSpiderFall", "PoseSpiderJump", "PoseSpiderRoll", "PoseSpinJump", "PoseStanding", "Readout", "SamusLayBomb", "SamusShoot", "SamusTryShooting", "SaveStation", "TitleFrame", "TitleSchemeStep", "TitleSlotStep", "TryPausing" },
         .note = "Also `PublishPad`'s, and derived from the previous frame's held byte -- so the *first* graded frame sees a rising edge computed against a pad the port never read. A one-frame effect at the anchor, and the same one at every re-anchor. Step 13c adds `MainLoop`: the cutscene arm at 00:$0519 reads Select off it, the one input a frozen Samus keeps. 1.0 Step 20a: `PoseInMouth` swallows on a press of left (00:$0E26).",
     },
     .{
