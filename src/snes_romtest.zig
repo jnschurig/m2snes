@@ -42,6 +42,7 @@ const death = @import("death.zig");
 const title_oracle = @import("title_oracle.zig");
 const pause_oracle = @import("pause_oracle.zig");
 const title_super = @import("title_super.zig");
+const title_badge = @import("title_badge.zig");
 const colors = @import("colors.zig");
 
 /// One byte of an engine constant or variable address, by symbol name. Step 12e
@@ -6634,7 +6635,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\-- 100  the engine was handed a pose it could not run
         \\-- 101  "Super" is not `super.png` at `super_at` over the Game Boy's title,
         \\--      or its two colours are not the approved ones in CGRAM (Step 24j)
-        \\-- 102  "Super" is still in BG1's map once the game has started
+        \\-- 102  "Super", or the L badge (colour schemes Step 7), is still in
+        \\--      BG1's map once the game has started
         \\-- 103  a frame asked for the select sound another number of times than
         \\--      the Game Boy's (Step 24i): the cart's `!AudRec` against the
         \\--      stores `title_oracle.selectSites` finds, executed
@@ -6691,6 +6693,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\local SUPER_X0, SUPER_Y0, SUPER_W, SUPER_H = {d}, {d}, {d}, {d}
         \\local SUPER_CG, SUPER_RED, SUPER_BLUE = {d}, {d}, {d}
         \\local SUPER_MAP, SUPER_COLS, SUPER_ROWS = {d}, {d}, {d}
+        \\-- Colour schemes Step 7: the L badge's patch in BG1's map.
+        \\local BADGE_MAP, BADGE_COLS, BADGE_ROWS = {d}, {d}, {d}
         \\
         \\
     , .{
@@ -6699,6 +6703,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         (@as(u32, title_super.palette) * 16 + 1) * 2, super_red,  super_blue,
         (try sym("ConstReadoutMap") + title_super.patch.map_offset) * 2,
         title_super.patch.cols,     title_super.patch.rows,
+        (try sym("ConstReadoutMap") + title_badge.patch.map_offset) * 2,
+        title_badge.patch.cols,     title_badge.patch.rows,
     });
 
     // Per title frame: the three state bytes and the menu's sprites, as the
@@ -6863,6 +6869,11 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\  for r = 0, SUPER_ROWS - 1 do
         \\    for c = 0, SUPER_COLS * 2 - 1 do
         \\      if emu.read(SUPER_MAP + r * 64 + c, vram) ~= 0 then fail(102, prevT) end
+        \\    end
+        \\  end
+        \\  for r = 0, BADGE_ROWS - 1 do
+        \\    for c = 0, BADGE_COLS * 2 - 1 do
+        \\      if emu.read(BADGE_MAP + r * 64 + c, vram) ~= 0 then fail(102, prevT) end
         \\    end
         \\  end
         \\  emu.stop(0)

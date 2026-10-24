@@ -74,7 +74,13 @@ pub const Art = struct {
 };
 
 pub fn decode(a: std.mem.Allocator) !Art {
-    const d = try png.decodeRgba(a, png_bytes);
+    return decodeWith(a, png_bytes, &colours);
+}
+
+/// An art PNG as indexes into `allowed`, plus one: 0 transparent. Also
+/// `title_badge`'s.
+pub fn decodeWith(a: std.mem.Allocator, bytes: []const u8, allowed: []const [3]u8) !Art {
+    const d = try png.decodeRgba(a, bytes);
     defer a.free(d.pixels);
     const px = try a.alloc(u8, d.w * d.h);
     errdefer a.free(px);
@@ -86,7 +92,7 @@ pub fn decode(a: std.mem.Allocator) !Art {
         }
         // A colour James did not draw with is an error, not a nearest match:
         // an editor that anti-aliased the art would otherwise pass unseen.
-        p.* = for (colours, 1..) |k, n| {
+        p.* = for (allowed, 1..) |k, n| {
             if (c[3] == 255 and std.mem.eql(u8, c[0..3], &k)) break @intCast(n);
         } else return Error.UnexpectedColour;
     }
@@ -104,13 +110,14 @@ pub fn bgr15(c: [3]u8) u16 {
     return @as(u16, channel5(c[0])) | (@as(u16, channel5(c[1])) << 5) | (@as(u16, channel5(c[2])) << 10);
 }
 
-/// The patch of whole BG1 tiles the art sits in.
-pub fn Patch(comptime w: usize, comptime h: usize) type {
+/// The patch of whole BG1 tiles a `w` by `h` art drawn at BG1 pixel
+/// (`bx`, `by`) sits in.
+pub fn Patch(comptime bx: u16, comptime by: u16, comptime w: usize, comptime h: usize) type {
     return struct {
-        pub const shift_x: usize = bg_x % 8;
-        pub const shift_y: usize = bg_y % 8;
-        pub const col: usize = bg_x / 8;
-        pub const row: usize = bg_y / 8;
+        pub const shift_x: usize = bx % 8;
+        pub const shift_y: usize = by % 8;
+        pub const col: usize = bx / 8;
+        pub const row: usize = by / 8;
         pub const cols: usize = (shift_x + w + 7) / 8;
         pub const rows: usize = (shift_y + h + 7) / 8;
         /// Word offset of the patch's first row in BG1's 32x32 map.
@@ -122,7 +129,7 @@ pub fn Patch(comptime w: usize, comptime h: usize) type {
 /// caller checks the file agrees.
 pub const art_w: usize = 67;
 pub const art_h: usize = 17;
-pub const patch = Patch(art_w, art_h);
+pub const patch = Patch(bg_x, bg_y, art_w, art_h);
 
 pub const map_header_bytes: usize = 6;
 
@@ -145,22 +152,10 @@ pub fn blobs(a: std.mem.Allocator) !Blobs {
 
     var next = chr_first;
     for (0..patch.rows) |ty| for (0..patch.cols) |tx| {
-        var tile: [32]u8 = @splat(0);
-        var any = false;
-        for (0..8) |py| for (0..8) |pxl| {
-            const ax = @as(isize, @intCast(tx * 8 + pxl)) - @as(isize, patch.shift_x);
-            const ay = @as(isize, @intCast(ty * 8 + py)) - @as(isize, patch.shift_y);
-            if (ax < 0 or ay < 0 or ax >= art.w or ay >= art.h) continue;
-            const v = art.at(@intCast(ax), @intCast(ay));
-            if (v == 0) continue;
-            any = true;
-            const bit: u3 = @intCast(7 - pxl);
-            for (0..4) |plane| if ((v >> @intCast(plane)) & 1 != 0) {
-                tile[(plane / 2) * 16 + py * 2 + plane % 2] |= @as(u8, 1) << bit;
-            };
-        };
+        const x0 = @as(isize, @intCast(tx * 8)) - @as(isize, patch.shift_x);
+        const y0 = @as(isize, @intCast(ty * 8)) - @as(isize, patch.shift_y);
         var word: u16 = 0;
-        if (any) {
+        if (encodeTile(art, x0, y0, 0, art.h)) |tile| {
             if (next > 0xFF) return Error.TooManyCharacters;
             try chr.appendSlice(a, &tile);
             word = next | (@as(u16, palette) << 10);
@@ -176,6 +171,28 @@ pub fn blobs(a: std.mem.Allocator) !Blobs {
     for (colours, 1..) |c, i| std.mem.writeInt(u16, pal[i * 2 ..][0..2], bgr15(c), .little);
 
     return .{ .chr = try chr.toOwnedSlice(a), .pal = pal, .map = map };
+}
+
+/// The 4bpp character for the art's 8x8 pixels from (`x0`, `y0`), which may
+/// lie partly off it, or null if every pixel there is transparent. Only rows
+/// `top` to `bottom` (exclusive) count as the art's, so a strip of a taller
+/// image is a picture of its own.
+pub fn encodeTile(art: Art, x0: isize, y0: isize, top: usize, bottom: usize) ?[32]u8 {
+    var tile: [32]u8 = @splat(0);
+    var any = false;
+    for (0..8) |py| for (0..8) |pxl| {
+        const ax = x0 + @as(isize, @intCast(pxl));
+        const ay = y0 + @as(isize, @intCast(py));
+        if (ax < 0 or ay < top or ax >= art.w or ay >= bottom) continue;
+        const v = art.at(@intCast(ax), @intCast(ay));
+        if (v == 0) continue;
+        any = true;
+        const bit: u3 = @intCast(7 - pxl);
+        for (0..4) |plane| if ((v >> @intCast(plane)) & 1 != 0) {
+            tile[(plane / 2) * 16 + py * 2 + plane % 2] |= @as(u8, 1) << bit;
+        };
+    };
+    return if (any) tile else null;
 }
 
 /// The art laid over a Game Boy picture of `width` pixels a row: each opaque

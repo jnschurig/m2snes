@@ -11,7 +11,10 @@
 //!
 //! **What is graded.** After each step, CGRAM's 16 scheme words are the
 //! expected scheme's (`colors.cgramWords`) and, where the step says, SRAM's
-//! scheme bytes are what the cart should have kept. And on every run, every
+//! scheme bytes are what the cart should have kept. And the bottom border,
+//! pixel for pixel (Step 7): on the title the scheme's L badge
+//! (`title_badge.picture`) at its place and the backdrop everywhere else, so
+//! the right of the border stays empty; in play the backdrop alone. And on every run, every
 //! CPU write to CGRAM (`$2122`) lands in forced blank or vblank, so a recolour
 //! never shows a half-written palette.
 //!
@@ -25,6 +28,10 @@ const save = @import("save.zig");
 const offsets = @import("offsets.zig");
 const inject = @import("snes_inject.zig");
 const romtest = @import("snes_romtest.zig");
+const title_badge = @import("title_badge.zig");
+const super = @import("title_super.zig");
+const screen = @import("snes_screen.zig");
+const target = @import("snes_target.zig");
 
 pub const Run = enum {
     /// (a) Empty slots: L recolours the title to `mono` and back, and keeps
@@ -185,6 +192,31 @@ fn writeWords(w: *std.Io.Writer) !void {
     try w.print(" }}\n", .{});
 }
 
+/// The bottom border's expected pixels (Step 7): each scheme's badge as a
+/// string of its pixels' indexes, those indexes' colours as Mesen draws them,
+/// and each scheme's backdrop, CGRAM's colour 0.
+fn writeBadge(w: *std.Io.Writer) !void {
+    try w.print(
+        \\-- The bottom border: the screen lines it runs, Mesen's lines above the
+        \\-- picture, and the L badge's rectangle on the screen.
+        \\BORDER_Y0, BORDER_H, OVERSCAN = {d}, {d}, (239 - 224) // 2
+        \\BADGE_X, BADGE_Y, BADGE_W, BADGE_H = {d}, {d}, {d}, {d}
+        \\BADGE_RGB = {{
+    , .{
+        screen.band_top + target.view_h, target.screen_h - screen.band_top - target.view_h,
+        title_badge.screen_x,            title_badge.screen_y,
+        title_badge.art_w,               title_badge.badge_h,
+    });
+    for (title_badge.colours) |c| try w.print(" {d},", .{colors.rgb888(super.bgr15(c))});
+    try w.print(" }}\nBADGE, BACKDROP = {{}}, {{}}\n", .{});
+    for (0..colors.count) |id| {
+        const pic = try title_badge.picture(std.heap.page_allocator, @enumFromInt(id));
+        try w.print("BADGE[{d}] = \"", .{id});
+        for (pic) |v| try w.print("{d}", .{v});
+        try w.print("\"\nBACKDROP[{d}] = {d}\n", .{ id, colors.rgb888(colors.cgramWords(@enumFromInt(id))[0]) });
+    }
+}
+
 pub fn code(c: u8) []const u8 {
     return switch (c) {
         0 => "passed",
@@ -194,6 +226,7 @@ pub fn code(c: u8) []const u8 {
         10 => "CGRAM is not the expected scheme's words",
         11 => "SRAM's scheme bytes are not the ones the cart should have kept",
         12 => "a CGRAM write outside forced blank and vblank",
+        13 => "the bottom border is not the scheme's L badge on the backdrop, or not empty in play",
         255 => "timeout or Lua error",
         else => "unknown",
     };
@@ -213,7 +246,9 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         \\-- Exit codes: 0 every step held; 1 Fatal; 2 out of frames; 4 an
         \\-- unrunnable pose; 10 CGRAM not the expected scheme's; 11 SRAM's scheme
         \\-- bytes not the expected; 12 a CGRAM write outside forced blank and
-        \\-- vblank. A failure prints what it compared.
+        \\-- vblank; 13 the bottom border not the scheme's L badge on the
+        \\-- backdrop on the title, or not the backdrop alone in play. A failure
+        \\-- prints what it compared.
         \\
         \\local wram  = emu.memType.snesWorkRam
         \\local sram  = emu.memType.snesSaveRam
@@ -234,6 +269,7 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         colors.sram_at,           save.slots,              save.slot_size,
     });
     try writeWords(w);
+    try writeBadge(w);
     try w.print("MAGIC = {{", .{});
     for (colors.sram_magic) |b| try w.print(" {d},", .{b});
     try w.print(" }}\nRECORD = {{", .{});
@@ -290,9 +326,27 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         \\  end
         \\  return nil
         \\end
+        \\-- Set by Start, cleared by the reset: no badge in play.
+        \\local inplay = false
+        \\local function border(id)
+        \\  local buf = emu.getScreenBuffer()
+        \\  for y = BORDER_Y0, BORDER_Y0 + BORDER_H - 1 do
+        \\    for x = 0, 255 do
+        \\      local want = BACKDROP[id]
+        \\      local bx, by = x - BADGE_X, y - BADGE_Y
+        \\      if not inplay and bx >= 0 and bx < BADGE_W and by >= 0 and by < BADGE_H then
+        \\        local v = BADGE[id]:byte(by * BADGE_W + bx + 1) - 48
+        \\        if v ~= 0 then want = BADGE_RGB[v] end
+        \\      end
+        \\      local got = buf[(y + OVERSCAN) * 256 + x + 1] & 0xFFFFFF
+        \\      if got ~= want then fail(13, string.format("step %d: border pixel (%d, %d) is %06X, wanted %06X (scheme %d, %s)", step, x, y, got, want, id, inplay and "in play" or "the title")) end
+        \\    end
+        \\  end
+        \\end
         \\local function expect(id)
         \\  local got = scheme()
         \\  if got ~= id then fail(10, string.format("step %d: CGRAM holds scheme %s, wanted %d (slot %d)", step, tostring(got), id, emu.read(R.slot, wram))) end
+        \\  border(id)
         \\end
         \\local function sramIs(ids)
         \\  local want = {{}}
@@ -310,6 +364,7 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         \\local function reset()
         \\  emu.reset()
         \\  phase = 0
+        \\  inplay = false
         \\  frame()
         \\end
         \\-- Start alone, and into play: the frame counter stops while the title
@@ -318,6 +373,7 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         \\  PAD = {{ start = true }}
         \\  wait(2)
         \\  PAD = {{}}
+        \\  inplay = true
         \\  wait(IN_PLAY)
         \\end
         \\-- The clear, as a player does it: Select shows the option, Down held

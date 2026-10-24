@@ -196,6 +196,7 @@ pub fn build(b: *std.Build) void {
         "src/snes_layout.zig", "src/snes_screen.zig", "src/snes_render.zig",
         "src/snes_inject.zig", "src/inspect.zig", "src/title_super.zig",
         "src/gfx_info.zig", "src/colors.zig", "src/gbc_oracle.zig",
+        "src/title_badge.zig",
     };
     var snes_mods: [snes_files.len]*std.Build.Module = undefined;
     for (snes_files, 0..) |f, i| {
@@ -1669,10 +1670,12 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
 /// `snes_convert.zig`, directly or not, needs both. And the title's "Super"
 /// (metroid2-0b Step 24j), which the converter decodes from its PNG: the file,
 /// and `png.zig` as the one shared module, since a module that imported it by
-/// path as well as by name would hold the same file twice.
+/// path as well as by name would hold the same file twice. The title's L badge
+/// (colour schemes Step 7) comes the same way.
 fn addAudio(b: *std.Build, mod: *std.Build.Module) void {
     mod.addAnonymousImport("audio_bin", .{ .root_source_file = b.path("engine/audio.bin") });
     mod.addAnonymousImport("title_super_png", .{ .root_source_file = b.path("assets/title_super.png") });
+    mod.addAnonymousImport("title_badge_png", .{ .root_source_file = b.path("assets/title_badge.png") });
     mod.addImport("png", png_module.?);
     addShimpkg(b, mod);
 }

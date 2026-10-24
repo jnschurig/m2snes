@@ -1775,6 +1775,21 @@ test "the engine's title-art constants are title_super's" {
     try testing.expectEqual(@as(u32, target.bg12_char_base), @as(u32, 0x1000));
 }
 
+test "the engine's L badge constants are title_badge's" {
+    // Colour schemes Step 7. The engine finds the badge's blobs by id after
+    // "Super"'s, uploads its characters and palette where the converter put
+    // them, and writes each scheme's patch by its size; each is a mirror.
+    const tb = @import("title_badge.zig");
+    try testing.expectEqual(@as(u32, 3), symbol("ConstTitleBadgeChr").?);
+    try testing.expectEqual(@as(u32, 4), symbol("ConstTitleBadgePal").?);
+    try testing.expectEqual(@as(u32, 5), symbol("ConstTitleBadgeMap").?);
+    try testing.expectEqual(@as(u32, tb.chr_first), symbol("ConstBadgeChrFirst").?);
+    try testing.expectEqual(@as(u32, @as(u32, tb.palette) * 16), symbol("ConstBadgeCgram").?);
+    try testing.expectEqual(@as(u32, tb.patch.map_offset), symbol("ConstBadgeMapAt").?);
+    try testing.expectEqual(@as(u32, tb.patch.cols), symbol("ConstBadgeCols").?);
+    try testing.expectEqual(@as(u32, tb.patch.rows), symbol("ConstBadgeRows").?);
+}
+
 test "the debug menu's digits are the readout's, in colour 1" {
     // 1.0 Step 4. The same seventeen glyphs, drawn white beside the item
     // font's letters: plane 0 is the readout's rows and plane 1 is empty.

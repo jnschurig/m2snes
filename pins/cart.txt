@@ -2,6 +2,6 @@
 # Hashes only. Never edit by hand: an intended output change re-pins with
 #   zig build repin -- "<why>"
 # which logs the old and new hashes and the reason in pins/history.md.
-retail 9d1e398f05ee8889b03d21f65148406f1c0459f3
-debug 9fe3a6893c7f44615a42cba7ac73913bc2c62ccf
+retail 15b38c81a8721e4a9d46ffa2cd1dc6dc0ce49fa7
+debug 215a19f5a0d752079562f94ffbecfd0c61f217e6
 crawl d4398e1b546fdda68e3146aab24910c09143d3ef

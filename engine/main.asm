@@ -455,6 +455,18 @@ assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
 !TITLE_ART_MAP    = 2
 !TITLE_ART_HEADER = 6           ; `title_super.map_header_bytes`
 !TITLE_ART_CGRAM  = 7*16        ; BG palette 7, `title_super.palette`
+; And the L badge's, after them, mirrored from `src/title_badge.zig` (colour
+; schemes Step 7): the characters, the palette, and every scheme's patch of
+; BG1 map words, in scheme id order, each `!BADGE_ROWS` rows of `!BADGE_COLS`.
+!TITLE_BADGE_CHR  = 3
+!TITLE_BADGE_PAL  = 4
+!TITLE_BADGE_MAP  = 5
+!BADGE_CHR_FIRST  = $80         ; `title_badge.chr_first`
+!BADGE_CGRAM      = 6*16        ; BG palette 6, `title_badge.palette`
+!BADGE_MAP_AT     = (23*32)+6   ; `title_badge.patch`: its word offset in BG1's map
+!BADGE_COLS       = 6
+!BADGE_ROWS       = 3
+!BADGE_BYTES      = !BADGE_COLS*!BADGE_ROWS*2  ; one scheme's patch
 
 ; Blob ids within !CLASS_PHYSICS, mirrored from src/physics.zig's `Which`.
 !PHYS_FALL       = 0
@@ -3555,6 +3567,7 @@ ConstCollBlobs = !COLL_BLOBS
 !SchemeDue    = $07A3           ; NMI owes CGRAM the scheme's words (`SchemeNmi`)
 !SchemeSlot   = $07A4           ; the slot the title last loaded a scheme for
 !SlotGame     = $07A5           ; 3: nonzero while the slot holds a game (`SlotIsGame`)
+!BadgeMap     = $07A8           ; 3: the L badge's map blob, for `BadgeShow` in NMI
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -4111,6 +4124,15 @@ ConstClassTitleArt = !CLASS_TITLE_ART
 ConstTitleArtHeader = !TITLE_ART_HEADER
 ConstTitleArtCgram = !TITLE_ART_CGRAM
 ConstTitleArtMap = !TITLE_ART_MAP
+; Colour schemes Step 7's, against `title_badge.zig`.
+ConstTitleBadgeChr = !TITLE_BADGE_CHR
+ConstTitleBadgePal = !TITLE_BADGE_PAL
+ConstTitleBadgeMap = !TITLE_BADGE_MAP
+ConstBadgeChrFirst = !BADGE_CHR_FIRST
+ConstBadgeCgram  = !BADGE_CGRAM
+ConstBadgeMapAt  = !BADGE_MAP_AT
+ConstBadgeCols   = !BADGE_COLS
+ConstBadgeRows   = !BADGE_ROWS
 ConstClassDebug = !CLASS_DEBUG
 ConstDebugBlobMetroids = !DEBUG_BLOB_METROIDS
 ConstDebugQueenBank = !DEBUG_QUEEN_BANK
@@ -5414,6 +5436,12 @@ assert WindowBandsEnd-WindowBands <= !BANDS_ROOM
 ; The top border is one entry, so its main-screen byte is the table's second.
 assert !BAND_TOP <= 127
 !BAND_TOP_TM = !Bands+1
+; And the bottom border's, colour schemes Step 7: one entry, after the top's
+; one, the play field's two and the window's one, so its byte is the tenth.
+; The title's L badge turns BG1 on there.
+assert !BAND_BOTTOM <= 127
+assert WindowBandsEnd-WindowBands == 11
+!BAND_BOTTOM_TM = !Bands+9
 ; And `!BAND_PLAY_TM`/`!BAND_HUD_TM`, defined with the death that uses them: the
 ; play field is two entries behind the top border's one, so its second byte is
 ; the table's fourth and the window's byte, the next entry's, is its eighth.
@@ -25078,15 +25106,126 @@ UploadTitleArt:
         lda.b #!TM_BG1
         tsb.w !BAND_PLAY_TM
         tsb.w !BAND_PLAY_TM2
+        ; Colour schemes Step 7: the L badge. Its characters from their own
+        ; first id, its palette into BG palette 6, the map blob's address kept
+        ; for NMI, the scheme's patch, and BG1 on the bottom border's band.
+        sep #$20
+        lda.b #!TITLE_BADGE_CHR
+        jsr TitleArtFind
+        sep #$20
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!BG12_CHAR_BASE+(!BADGE_CHR_FIRST*16)
+        sta !VMADDL
+        sep #$20
+        lda.b #$01              ; two registers, incrementing source
+        sta !DMAP0
+        lda.b #$18
+        sta !BBAD0
+        jsr TitleArtDma
+        sep #$20
+        lda.b #!TITLE_BADGE_PAL
+        jsr TitleArtFind
+        sep #$20
+        lda.b #!BADGE_CGRAM
+        sta !CGADD
+        stz !DMAP0              ; one register, incrementing source
+        lda.b #$22
+        sta !BBAD0
+        jsr TitleArtDma
+        sep #$20
+        lda.b #!TITLE_BADGE_MAP
+        jsr TitleArtFind
+        rep #$20
+        lda !Blob
+        sta.w !BadgeMap
+        sep #$20
+        lda !Blob+2
+        sta.w !BadgeMap+2
+        jsl BadgeShow
+        sep #$20
+        lda.b #!TM_BG1
+        tsb.w !BAND_BOTTOM_TM
         rep #$30
+        rtl
+
+; Colour schemes Step 7. The L badge for `!Scheme`: its patch, row by row into
+; BG1's map, from the blob `UploadTitleArt` found. In forced blank, or from
+; NMI in vblank (`SchemeNmi`), which is why the blob's address is the one kept
+; in `!BadgeMap` rather than `FindBlob`'s, whose scratch the title's frame may
+; be using. DMA channel 0, as NMI's other transfers use it. Any widths; keeps
+; them.
+BadgeShow:
+        php
+        rep #$30
+        lda.w !Scheme
+        and.w #$00FF
+        tax
+        lda.w !BadgeMap
+-       dex                     ; the scheme's patch: `!BADGE_BYTES` an id
+        bmi +
+        clc
+        adc.w #!BADGE_BYTES
+        bra -
++       sta !A1T0L
+        sep #$20
+        lda.w !BadgeMap+2
+        sta !A1B0
+        lda.b #$01              ; two registers, incrementing source
+        sta !DMAP0
+        lda.b #$18
+        sta !BBAD0
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!READOUT_MAP+!BADGE_MAP_AT
+        ldy.w #!BADGE_ROWS
+.row
+        sta !VMADDL
+        pha
+        lda.w #!BADGE_COLS*2
+        sta !DAS0L
+        sep #$20
+        lda.b #$01              ; the source runs on from the row before
+        sta !MDMAEN
+        rep #$20
+        pla
+        clc
+        adc.w #32               ; the map's next row
+        dey
+        bne .row
+        plp
         rtl
 
 ; "Super" out of BG1's map again, as the title leaves: the same patch, zeroed.
 ; Under forced blank. The characters and palette stay; nothing else reads them.
+; The L badge's go the same way.
 ClearTitleArt:
         rep #$30
         lda.w #$0000
         jsr TitleArtMap
+        ; And the L badge's patch (colour schemes Step 7), and BG1 off the
+        ; bottom border's band again.
+        sep #$20
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!READOUT_MAP+!BADGE_MAP_AT
+        ldy.w #!BADGE_ROWS
+.row
+        sta !VMADDL
+        ldx.w #!BADGE_COLS
+-       stz !VMDATAL            ; a word: A is 16-bit
+        dex
+        bne -
+        clc
+        adc.w #32
+        dey
+        bne .row
+        sep #$20
+        stz.w !BAND_BOTTOM_TM
+        rep #$30
         rtl
 
 ; The map patch into BG1's map, each of its words ANDed with A (16-bit): $FFFF
@@ -25535,14 +25674,16 @@ SchemeLater:
         plp
         rtl
 
-; From NMI, in vblank: the scheme `SchemeLater` asked for, into CGRAM.
-; Leaves A 8-bit.
+; From NMI, in vblank: the scheme `SchemeLater` asked for, into CGRAM, and
+; its name on the L badge (Step 7). Leaves A 8-bit.
 SchemeNmi:
         sep #$20
         lda.w !SchemeDue
         beq +
         stz.w !SchemeDue
-        jmp LoadPalette         ; whose `rtl` is this one's
+        jsl LoadPalette
+.badge                                  ; the `schemes` rung's fault patches this
+        jmp BadgeShow           ; whose `rtl` is this one's
 +       rtl
 
 ; `colors.sram_magic`: SRAM holds slot schemes.

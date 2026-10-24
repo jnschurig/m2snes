@@ -1455,6 +1455,7 @@ pub fn main(init: std.process.Init) !void {
                 try out.print("      the clear         the emptied slot shows the default\n", .{});
                 try out.print("      bad bytes         a bad magic, $FF and an id past the cart's schemes play in the default\n", .{});
                 try out.print("      vblank            every CGRAM write in forced blank or vblank\n", .{});
+                try out.print("      L badge           the scheme's name in the bottom border, the rest of it empty, gone in play\n", .{});
                 try out.print("      fault sweep       {d}/{d} engine faults caught by their runs and codes\n", .{ scheme_faults.len, scheme_faults.len });
             }
         }
@@ -3358,6 +3359,12 @@ const scheme_faults = [_]SchemeFault{
     .{ .label = "SchemeStore", .patch = &.{0x6B}, .run = .empty_slot, .want = 11 },
     // NMI never loads what the title asked for.
     .{ .label = "SchemeNmi", .patch = &.{0x6B}, .run = .l_press, .want = 10 },
+    // Step 7: NMI recolours and leaves the badge's name as it was (`rtl` over
+    // the `jmp BadgeShow`).
+    .{ .label = "SchemeNmi_badge", .patch = &.{0x6B}, .run = .l_press, .want = 13 },
+    // The badge left in BG1's map and BG1 on the bottom border (`rtl`), so
+    // play shows it.
+    .{ .label = "ClearTitleArt", .patch = &.{0x6B}, .run = .power_on, .want = 13 },
 };
 
 const ScenarioFault = struct { label: []const u8, offset: usize = 0, patch: []const u8, scenario: []const u8, want: u8 };

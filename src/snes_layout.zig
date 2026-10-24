@@ -111,7 +111,9 @@ pub const Class = enum {
     aram,
     /// "Super" on the title (metroid2-0b Step 24j): not the ROM's, but
     /// `assets/title_super.png` converted by `title_super.zig` -- its BG1
-    /// characters, its palette, and its map patch, blob ids 0, 1 and 2.
+    /// characters, its palette, and its map patch, blob ids 0, 1 and 2; and
+    /// the L badge's, from `assets/title_badge.png` by `title_badge.zig`, ids
+    /// 3, 4 and 5 (colour schemes Step 7).
     /// Appended last, for the reason every class since `directory` was.
     title_art,
     /// The debug menu's METROIDS and FLAGS lists (1.0 Step 4), built from the

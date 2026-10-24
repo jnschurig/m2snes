@@ -10,6 +10,7 @@ updated:
   - 2026-10-24T02:23:17Z
   - 2026-10-24T03:12:25Z
   - 2026-10-24T04:43:43Z
+  - 2026-10-24T19:54:20Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -278,31 +279,46 @@ tripwire for `full`.
     run, the clear showing the default. `residue.zig` lists `TitleSchemeStep`
     as a reader of `!InputRisingEdge`. The crawl didn't move.
 
-- [ ] **Step 7: The L badge in the bottom border (F2)**
-  - [ ] Draft `assets/title_badge.png` in our own art: a 16×16 L-button
+- [x] **Step 7: The L badge in the bottom border (F2)**
+  - [x] Draft `assets/title_badge.png` in our own art: a 16×16 L-button
         glyph and one name strip per scheme (`MONO`, `GBC`). It uses
         `title_super.png`'s rules: a fixed palette, checked colours, and
         index 0 transparent. James can redraw it.
-  - [ ] `src/title_badge.zig`, following `title_super.zig`:
+  - [x] `src/title_badge.zig`, following `title_super.zig`:
     - it decodes the PNG and checks its colours;
     - it emits a chr blob from a free BG1 character range, a palette for
       BG palette 6 (CGRAM `$60`, free), and a map patch per scheme;
     - it places the badge at the window's left edge in the bottom border.
-  - [ ] Engine:
+  - [x] Engine:
     - `UploadTitleArt` also uploads the badge's chr and palette, plus the
       active scheme's patch;
     - define `!BAND_BOTTOM_TM`, and turn BG1 on in the bottom band on the
       title only; `ClearTitleArt` turns it off and clears the patch;
     - `!SchemeDue`'s NMI upload also rewrites the name patch.
-  - [ ] Rungs:
+  - [x] Rungs:
     - the badge's pixels in the border match `title_badge.png` for each
       scheme;
     - the badge is gone in play;
     - the existing title rungs (window rows, "Super") are unchanged;
     - the bottom-right corner stays empty.
-  - [ ] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
+  - [x] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
         `crawl` if `zig build repin` shows it moved.
-  - [ ] Commit, re-pin included.
+  - [x] Commit, re-pin included.
+  - Done as: the PNG is 48×32, one 48×16 badge a scheme stacked in id
+    order; tiles are deduplicated, so the glyph is stored once. Characters
+    from `$80`, BG palette 6, 4 lines below the window (BG1 map rows 23-25,
+    6×3 words a scheme). `title_super` gained `decodeWith`, `encodeTile` and
+    a positioned `Patch` for it. The blobs are `title_art` ids 3-5.
+    `UploadTitleArt` keeps the map blob's address in `!BadgeMap` (`$07A8`),
+    so `BadgeShow` can DMA the scheme's patch from NMI without `FindBlob`;
+    `SchemeNmi` calls it after `LoadPalette`. `!BAND_BOTTOM_TM` is
+    `!Bands+9`, held by an assert on the table's size. The grading is in the
+    `schemes` rung: every `expect` also reads the whole bottom border (code
+    13), the badge plus backdrop on the title, backdrop alone in play, which
+    also keeps the right corner empty. The title rung's 102 also checks the
+    badge patch is zero once play starts. Faults: `SchemeNmi_badge` → `rtl`
+    exits 13 on `l_press`; `ClearTitleArt` → `rtl` exits 13 on `power_on`.
+    The crawl didn't move.
 
 - [ ] **Step 8: Docs, playtest, PR**
   - [ ] `docs/feature_tracker.md`: a colour-schemes entry, graded by the
