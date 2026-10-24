@@ -7,6 +7,7 @@ updated:
   - 2026-10-14T14:59:17Z
   - 2026-10-14T19:16:28Z
   - 2026-10-24T01:31:03Z
+  - 2026-10-24T02:23:17Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -142,23 +143,37 @@ tripwire for `full`.
     step exits 158 (run by hand), and `UpdateStatusBar_hudAttr` patched to
     `#$00` exits 159 (in the gate). The crawl didn't move.
 
-- [ ] **Step 4: Graders read colour through the scheme tables (cart unchanged)**
-  - [ ] First, confirm Mesen's BGR555 → RGB888 conversion on one framebuffer
+- [x] **Step 4: Graders read colour through the scheme tables (cart unchanged)**
+  - [x] First, confirm Mesen's BGR555 → RGB888 conversion on one framebuffer
         read (expected `(c<<3)|(c>>2)`). The exact matching below depends on
         it.
-  - [ ] `colors.luaShade(scheme)` emits a Lua `shade(px)` built from that
+  - [x] `colors.luaShade(scheme)` emits a Lua `shade(px)` built from that
         scheme's 16 words. It matches **exactly only**, and a colour outside
         the scheme raises a Lua error naming the pixel and its RGB. Nothing
         falls back to the nearest colour.
-  - [ ] Replace all six hand-written `shade` functions with the generated
+  - [x] Replace all six hand-written `shade` functions with the generated
         one, parameterised by the expected scheme (the default, since the
         rungs zero SRAM).
-  - [ ] Any rung that turns out to sample dimmed frames (a fade, the Queen's
+  - [x] Any rung that turns out to sample dimmed frames (a fade, the Queen's
         flash), which the old thresholds tolerated, gets explicit handling
         at that rung, with a comment. No blanket tolerance.
-  - [ ] Verify: `verify` and `verify-full` are green, still on greys. This
+  - [x] Verify: `verify` and `verify-full` are green, still on greys. This
         proves the helper reproduces today's thresholds.
-  - [ ] Commit: "graders: shade through the scheme tables".
+  - [x] Commit: "graders: shade through the scheme tables".
+  - Done as: `colors.writeLuaShade(w, scheme)`. The testrunner hands back
+    only an exit code, so an off-scheme pixel prints its RGB (which the
+    scenario runner shows) and stops with `colors.lua_off_scheme` (5, free
+    in every pixel-reading script), which each describer reads as
+    `off_scheme_why`. Positions aren't named: callers pass a pixel, not a
+    place. The table is local to a `do` block, so `m2snes.lua` gains no
+    top-level local (it is near Lua's 200). The scheme graded is
+    `colors.fresh_scheme` (`mono`), which Step 5 retires for
+    `default_scheme`. The conversion was confirmed by exact matching passing
+    on greys. The fault (graders set to `gbc` on the grey cart) exits 5 from
+    the title, cold-boot, `snes boot` and refills scripts. No rung sampled a
+    dimmed frame, so none needed handling. Found for Step 6: the title
+    script writes its fail frame to SRAM `$1F00-$1F01`, inside the planned
+    `$701F00` scheme region.
 
 - [ ] **Step 5: Schemes in the cart; default `gbc` (F1, F3b)**
   - [ ] Asm side:

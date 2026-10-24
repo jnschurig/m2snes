@@ -37,6 +37,7 @@ const screen = @import("snes_screen.zig");
 const screens = @import("screens.zig");
 const offsets = @import("offsets.zig");
 const convert = @import("snes_convert.zig");
+const colors = @import("colors.zig");
 
 // ---- The Game Boy's side ----------------------------------------------------
 
@@ -300,6 +301,7 @@ pub fn code(c: u8) []const u8 {
         2 => "the new game or play never arrived, or the run outlasted its frames",
         3 => "A on the entry's row did not warp: the menu is still up",
         4 => "the engine was handed a pose it could not run",
+        colors.lua_off_scheme => colors.off_scheme_why,
         20 => "the warp arrived in another bank, or drew another cell than the camera's, or took another cell's scroll flags",
         26 => "the background map over the camera's view is not the Game Boy's",
         21 => "the loaded state ($D808-$D814) is not the Game Boy's after the chain",
@@ -1136,6 +1138,7 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
                 if (e.dest.kind == .queen) break i;
             } else return error.NoQueenEntry;
             const gb = try queen.measure(a, rom, queen_frames[queen_frames.len - 1] + 2);
+            try colors.writeLuaShade(w, colors.fresh_scheme);
             try w.print("local QUEEN_ROW, VIEW_W, VIEW_H, WIN_LEFT, BAND_TOP = {d}, {d}, {d}, {d}, {d}\nQS = {{", .{
                 debug_tables.warpRow(sorted, i)[1], target.view_w, target.view_h, (target.screen_w - target.view_w) / 2, (target.screen_h - target.view_h) / 2,
             });
@@ -1152,11 +1155,6 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
             try w.print(
                 \\}}
                 \\local OVERSCAN = (239 - 224) // 2
-                \\local function shade(px)
-                \\  local r = (px >> 16) & 0xFF
-                \\  if r > 200 then return 0 elseif r > 120 then return 1
-                \\  elseif r > 40 then return 2 else return 3 end
-                \\end
                 \\-- Every object on the screen, as the pixels it may cover in the
                 \\-- play window. The Game Boy side has none: Samus, and the HUD's
                 \\-- Metroid, are graded elsewhere.
@@ -1328,12 +1326,8 @@ fn writeRefills(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
             try w.print("\"\n", .{});
         }
     }
+    try colors.writeLuaShade(w, colors.fresh_scheme);
     try w.print(
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\-- Refill `k` for FRAMES frames: in OAM with its record's parts every
         \\-- frame, each coloured pixel of its characters the shade the palette
         \\-- its entry selects gives that index, and at least once in palette 1.

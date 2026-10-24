@@ -23,6 +23,12 @@ pub const Scheme = enum(u8) {
 /// get.
 pub const default_scheme: Scheme = .gbc;
 
+/// The scheme the cart boots in with fresh SRAM, which is what the gate's
+/// rungs see: they zero SRAM first. Still `mono` because the cart carries no
+/// schemes yet. Colour schemes Step 5 makes the cart boot `default_scheme`
+/// and retires this.
+pub const fresh_scheme: Scheme = .mono;
+
 /// Four BGR555 colours, shade 0 (lightest) first.
 pub const Table = [4]u16;
 
@@ -105,6 +111,56 @@ fn shadeIn(t: Tables, colour: u16) ?u2 {
     return null;
 }
 
+/// A 15-bit colour as Mesen2's framebuffer holds it, `0xRRGGBB`: each 5-bit
+/// channel `c` becomes `(c << 3) | (c >> 2)`.
+pub fn rgb888(colour: u16) u24 {
+    const x = struct {
+        fn of(c: u16) u24 {
+            const v: u24 = c & 31;
+            return (v << 3) | (v >> 2);
+        }
+    };
+    return (x.of(colour) << 16) | (x.of(colour >> 5) << 8) | x.of(colour >> 10);
+}
+
+/// The exit code a generated `shade` stops with when a pixel is no colour of
+/// its scheme. It is free in every script that reads pixels, so each one's
+/// describer gives it the same meaning.
+pub const lua_off_scheme: u8 = 5;
+pub const off_scheme_why = "a pixel's colour is not one of the scheme's: CGRAM holds another scheme, or the frame was dimmed";
+
+/// Writes a Lua `shade(px)` that reads a Mesen2 framebuffer pixel back as the
+/// DMG shade it stands for in `scheme`, through `shadeOf`. It matches exactly:
+/// a colour outside the scheme prints its RGB and stops the script with
+/// `lua_off_scheme`. It never guesses the nearest colour, so a dimmed frame
+/// or a wrong palette shows up as that code and not as a misread shade.
+pub fn writeLuaShade(w: *std.Io.Writer, scheme: Scheme) !void {
+    // One top-level local, `shade`: `m2snes.lua` sits near Lua's 200.
+    try w.print("-- The `{s}` scheme's colours as Mesen draws them, each the shade it stands for\n", .{@tagName(scheme)});
+    try w.writeAll("-- (`colors.writeLuaShade`). Anything else is no colour of the scheme.\nlocal shade\ndo\n  local of = {");
+    const words = cgramWords(scheme);
+    for (words, 0..) |c, i| {
+        if (std.mem.indexOfScalar(u16, words[0..i], c) != null) continue;
+        try w.print(" [0x{X:0>6}] = {d},", .{ rgb888(c), shadeOf(scheme, c).? });
+    }
+    // `emu.stop` does not return, so the error ends the callback before it
+    // goes on with a nil shade.
+    try w.print(
+        \\ }}
+        \\  function shade(px)
+        \\    local s = of[px & 0xFFFFFF]
+        \\    if s == nil then
+        \\      print(string.format("a pixel's colour %06X is not one of the {s} scheme's", px & 0xFFFFFF))
+        \\      emu.stop({d})
+        \\      error("off-scheme pixel")
+        \\    end
+        \\    return s
+        \\  end
+        \\end
+        \\
+    , .{ @tagName(scheme), lua_off_scheme });
+}
+
 /// True when every colour in `t` stands for exactly one shade.
 pub fn uniqueShades(t: Tables) bool {
     for (t.layers()) |table| {
@@ -157,6 +213,29 @@ test "no scheme puts Fatal's magenta in colour 0" {
         const words = cgramWords(@enumFromInt(f.value));
         for ([_]usize{ 0, 4, 8, 12 }) |i| try std.testing.expect(words[i] != 0x7C1F);
     }
+}
+
+test "rgb888 is Mesen's expansion of each channel" {
+    try std.testing.expectEqual(@as(u24, 0xFFFFFF), rgb888(0x7FFF));
+    try std.testing.expectEqual(@as(u24, 0x000000), rgb888(0x0000));
+    try std.testing.expectEqual(@as(u24, 0xADADAD), rgb888(grey(1))); // 21 -> 173
+    try std.testing.expectEqual(@as(u24, 0x0000FF), rgb888(0x7C00)); // blue is the high channel
+    try std.testing.expectEqual(@as(u24, 0xFF0000), rgb888(0x001F));
+}
+
+test "the Lua shade lists each of the scheme's colours once, at its shade" {
+    var buf: [2048]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try writeLuaShade(&w, .gbc);
+    const src = w.buffered();
+    try std.testing.expect(std.mem.indexOf(u8, src, "[0xFFFFFF] = 0,") != null);
+    try std.testing.expect(std.mem.indexOf(u8, src, "[0x000000] = 3,") != null);
+    try std.testing.expect(std.mem.indexOf(u8, src, "[0x63A5FF] = 1,") != null); // $7E8C
+    try std.testing.expect(std.mem.indexOf(u8, src, "emu.stop(5)") != null);
+    // Zig's multiline strings are raw: a doubled brace or percent would reach
+    // the emulator as-is and kill the script.
+    try std.testing.expect(std.mem.indexOf(u8, src, "{{") == null);
+    try std.testing.expect(std.mem.indexOf(u8, src, "%%") == null);
 }
 
 test "the default is a valid id" {

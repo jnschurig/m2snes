@@ -67,6 +67,7 @@ const ppu_mod = @import("gb/ppu.zig");
 const target = @import("snes_target.zig");
 const oracle = @import("oracle.zig");
 const scenario = @import("scenario.zig");
+const colors = @import("colors.zig");
 
 pub const Error = error{ NoQueenEntry, NeverDied, TooManyDivs, NoSymbol, ScreenPartial, UnknownBgp, PressesOnLag };
 
@@ -838,6 +839,7 @@ pub fn writeLua(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
         last = @max(last, f);
     };
     try w.print("}}\nlocal LAST = {d}\n", .{last});
+    try colors.writeLuaShade(w, colors.fresh_scheme);
     try w.print("local WOKE = 0x{X:0>6}\nlocal DIVHIGH, DIVSITE, DIVS = 0x{X:0>4}, 0x{X:0>6}, {{", .{ woke, (try warp_grade.sym("VarDivClock") & 0xFFFF) + 1, site });
     for (gb.divs) |d| try w.print("{d},", .{d});
     try w.print(
@@ -851,14 +853,9 @@ pub fn writeLua(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
         \\end
         \\local function at(h, k) return tonumber(h:sub(2 * k - 1, 2 * k), 16) end
         \\-- The play window against our Game Boy's (1.0 Step 19c), as the
-        \\-- `queen` scenario compares it: shades off the red channel, and
+        \\-- `queen` scenario compares it: shades through the scheme, and
         \\-- every object's pixels left out, which the histories grade.
         \\local OVERSCAN = (239 - 224) // 2
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\local function objects()
         \\  local oam = emu.memType.snesSpriteRam
         \\  local mask = {{}}

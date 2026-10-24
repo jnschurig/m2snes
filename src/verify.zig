@@ -3032,6 +3032,7 @@ fn coldBootTest(io: std.Io, rom: []const u8, lua: []const u8) !ColdTest {
         157 => .{ .sequence = "no drawn frame followed a blank one in the appearance sequence: the behind check never ran" },
         158 => .{ .sequence = "the HUD's colours ($11-$13) made green showed nowhere, or off the status bar's lines: the HUD is not on its own palette" },
         159 => .{ .sequence = "the play field's colours ($01-$03) made green showed nowhere, or on the status bar's lines: the two share a palette" },
+        colors.lua_off_scheme => .{ .failed = colors.off_scheme_why },
         255 => .{ .failed = "the emulator timed out: the script never reached a verdict" },
         else => .{ .failed = "the cold-boot script exited with an unallocated code" },
     };
@@ -3408,6 +3409,7 @@ fn pauseCode(code: u8) []const u8 {
 fn titleCode(code: u8) []const u8 {
     return switch (code) {
         0 => "the title did what the Game Boy's did",
+        colors.lua_off_scheme => colors.off_scheme_why,
         90 => "Fatal ran",
         91 => "the title never came up",
         92 => "the title did not open as the Game Boy's: the option hidden, clear unselected, and the slot saveLastSlot names",
@@ -3743,6 +3745,7 @@ fn bootVerdict(exit: u8) BootTest {
         224 => .{ .metroid = "gate did not choose the table a Game Boy would at that count: `IF_MET_LESS` is taken at or below its operand (00:$254A)" },
         184 => .{ .enemy_death = "rests its 50% roll on a counter that does not alternate: `!EnFrame` took the same parity on every frame the enemy pass acted, which is the collapse `!FrameCount` was rejected for" },
         158 => .{ .block = "reformed with Samus vulnerable and `!BlkCrush` does not say so: 01:$5739's branch is recorded rather than followed, and a recording nothing reaches is dead code" },
+        colors.lua_off_scheme => .{ .failed = colors.off_scheme_why },
         else => |code| if (code >= 20 and code <= 60)
             .{ .differs = (code - 20) * 8 }
         else if (code >= 80 and code <= 120)

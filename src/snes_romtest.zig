@@ -42,6 +42,7 @@ const death = @import("death.zig");
 const title_oracle = @import("title_oracle.zig");
 const pause_oracle = @import("pause_oracle.zig");
 const title_super = @import("title_super.zig");
+const colors = @import("colors.zig");
 
 /// One byte of an engine constant or variable address, by symbol name. Step 12e
 /// needs two dozen of them in one table and the inline `@truncate(inject.symbol(
@@ -1517,6 +1518,7 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
     try writeScreen(w, "SCREEN", here);
     try writeScreen(w, "SCREEN_AFTER", after);
     try writeSprites(w, set);
+    try colors.writeLuaShade(w, colors.fresh_scheme);
 
     try w.print(
         \\-- Mesen hands back a 256x239 overscan frame as a ONE-BASED lua table, so
@@ -1525,12 +1527,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\-- were assumed to be 0-based and 8: the picture matched at an offset of one
         \\-- in each axis and looked like an engine bug.
         \\local OVERSCAN = (239 - 224) // 2
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\
         \\local function rd16(a, m) return emu.read(a, m) + 256 * emu.read(a + 1, m) end
         \\
@@ -5136,6 +5132,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
     // exist when it is created and these are read inside one.
     try writeBytes(w, "TITLE_CHR", run);
     try writeBytes(w, "TITLE_IDS", ids);
+    try colors.writeLuaShade(w, colors.fresh_scheme);
 
     try w.print(
         \\
@@ -5150,12 +5147,6 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- A quarter was tried first and sits exactly on the real ratio, which
         \\-- makes it a coin toss on the rounding.
         \\local MIN_SHARE = 8
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\
         \\-- Step 24e. The ship's cell has bit 11 of its transition word set, so on
         \\-- the Game Boy every part of hers carries OAM bit 7 there (00:$3ED5,
@@ -6754,6 +6745,7 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
     try writeBytes(w, "OBJCHR", obj_chr);
     try writeBytes(w, "AFTER", &run.slots_after);
     try writeSramPrelude(w, &seed);
+    try colors.writeLuaShade(w, colors.fresh_scheme);
 
     try w.print(
         \\
@@ -6780,12 +6772,6 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\  local s = ""
         \\  for _, k in ipairs(keys) do s = s .. k .. "," end
         \\  return s
-        \\end
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
         \\end
         \\
         \\-- A 15-bit colour as Mesen draws it: each channel c becomes (c << 3) | (c >> 2).
