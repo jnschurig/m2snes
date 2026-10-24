@@ -222,7 +222,7 @@ tripwire for `full`.
     `snes boot` exit 15; the fade grader expecting `mono` exits 252; the
     scenarios expecting `mono` exit 9. The crawl didn't move.
 
-- [ ] **Step 6: Per-slot schemes in SRAM, and L on the title (F2, F3)**
+- [x] **Step 6: Per-slot schemes in SRAM, and L on the title (F2, F3)**
   - [x] SRAM layout at `$701F00` (free, past the spawn flags): a 4-byte
         magic, then one scheme byte per slot. Add constants and a comment
         beside `!SRAM_SPAWN`, and teach `save.zig`'s layout the new region.
@@ -260,7 +260,7 @@ tripwire for `full`.
     - (h) the title timing and TAS rungs are unchanged.
   - [x] Verify: `verify`, `verify-full`. Re-pin `retail` and `debug`, and
         `crawl` if `zig build repin` shows it moved.
-  - [ ] Commit, re-pin included.
+  - [x] Commit, re-pin included.
   - Done as: the region is at `$701600`, not `$701F00`, because the title
     scripts write their fail frame at `$1F00`. It is `colors.sram_at`; `save.zig`
     gains `spawn_end`, and a test keeps the region past it and below `$1F00`.
