@@ -25,6 +25,10 @@ as.
 builds m2snes-debug.sfc, with a debug menu (L+R+Start in play) for testing.
 Its SHA-1 is the notes' "debug" line.
 
+The cart starts in the Game Boy Color's colours. On the title screen, L
+switches the selected file between GBC and MONO (the original greys), and each
+file keeps its own.
+
 macOS: the binary is not signed. If macOS blocks it, run this once:
 
     xattr -d com.apple.quarantine m2snes

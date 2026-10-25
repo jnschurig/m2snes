@@ -36,6 +36,7 @@ const screens = @import("screens.zig");
 const warp = @import("warp.zig");
 const save = @import("save.zig");
 const offsets = @import("offsets.zig");
+const colors = @import("colors.zig");
 
 // ---- Screen body to tilemap ------------------------------------------------
 
@@ -606,18 +607,6 @@ pub fn scrollY(camera_y: u16) u16 {
 
 // ---- Palette ---------------------------------------------------------------
 
-/// A DMG shade as a 15-bit SNES colour. Four evenly spaced greys, lightest
-/// first, which is the order `BGP` numbers them in.
-pub fn grey(shade: u2) u16 {
-    const level: u16 = switch (shade) {
-        0 => 31,
-        1 => 21,
-        2 => 10,
-        3 => 0,
-    };
-    return level | (level << 5) | (level << 10);
-}
-
 /// BG3's palette 0, as four CGRAM words.
 ///
 /// Entry 0 is the backdrop as well as the play field's colour 0, and that is
@@ -625,10 +614,10 @@ pub fn grey(shade: u2) u16 {
 /// out right. A Game Boy background pixel of index 0 is opaque and drawn with
 /// `BGP`'s first field; a SNES background pixel of colour 0 shows the backdrop.
 /// Writing the same colour into both means the two agree.
+///
+/// The colours are the `mono` scheme's play-field table (`colors.zig`).
 pub fn palette(bgp: u8) [4]u16 {
-    var out: [4]u16 = undefined;
-    for (0..4) |i| out[i] = grey(@intCast((bgp >> @intCast(i * 2)) & 3));
-    return out;
+    return colors.apply(colors.tables(.mono).bg, bgp);
 }
 
 // ---- Which screen the cart boots on ----------------------------------------
@@ -665,11 +654,6 @@ pub const Boot = struct {
     door_index: u16,
     /// The metatile table that script left selected.
     tiletable: u4,
-    palette: [4]u16,
-    /// OBP0 then OBP1, as the engine writes them into the first two object
-    /// palettes. `drawSamusSprite` moves every part to the second one while
-    /// Samus is invulnerable or in acid.
-    obj_palette: [8]u16,
     /// The `chr_obj` asset id of Samus's power-suit sheet. The injector fills
     /// this in - the converter assigns the id, and `chooseBoot` runs before
     /// conversion - so it is left at the sentinel here.
@@ -950,8 +934,6 @@ pub fn bootCandidates(allocator: std.mem.Allocator, rom: []const u8, limit: usiz
                 .cell = cell,
                 .door_index = choice.door_index,
                 .tiletable = choice.tiletable,
-                .palette = palette(screens.live_bgp),
-                .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
                 .samus_x = start.x,
                 .samus_y = start.y,
                 .cam_x = start.x,
@@ -1031,8 +1013,6 @@ pub fn bootIn(a: screens.Assignment, rom: []const u8, map_index: u8, cell: u8) E
                 .cell = at,
                 .door_index = choice.door_index,
                 .tiletable = choice.tiletable,
-                .palette = palette(screens.live_bgp),
-                .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
                 .samus_x = start.x,
                 .samus_y = start.y,
                 .cam_x = start.x,
@@ -1064,8 +1044,6 @@ pub fn chooseBoot(allocator: std.mem.Allocator, rom: []const u8) Error!Boot {
             .cell = cell,
             .door_index = choice.door_index,
             .tiletable = choice.tiletable,
-            .palette = palette(screens.live_bgp),
-            .obj_palette = palette(screens.live_obp0) ++ palette(screens.live_obp1),
             .samus_x = start.x,
             .samus_y = start.y,
             .cam_x = start.x,

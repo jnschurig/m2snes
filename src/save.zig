@@ -84,6 +84,14 @@ pub const magic_addr: u16 = 0x2083;
 pub const magic_len: u8 = 8;
 pub const magic = [magic_len]u8{ 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF };
 
+/// Each slot's spawn flags, `$B000 + slot * $200` (01:$7AA3 and $7ACA), and
+/// where the last ends. The game uses nothing of $A000-$BFFF past them but the
+/// credits' text, below them at $A800, so the cart's colour schemes go there
+/// (`colors.sram_at`, colour schemes Step 6).
+pub const spawn_base: u16 = 0xB000;
+pub const spawn_size: u16 = 0x200;
+pub const spawn_end: u16 = spawn_base + slots * spawn_size;
+
 /// The routine that writes a record, and the window it lives in.
 pub const writer_bank: u8 = 1;
 pub const writer_addr: u16 = 0x7ADF;
@@ -455,6 +463,14 @@ pub fn appearance(rom: []const u8) ?Appearance {
 
 const testing = std.testing;
 const testrom = @import("testrom");
+
+test "the colour schemes' SRAM is past everything the game keeps" {
+    const colors = @import("colors.zig");
+    try testing.expect(slot_base + colors.sram_at >= spawn_end);
+    // And below $1F00, where the title rungs write the frame a failure was
+    // found on.
+    try testing.expect(colors.sramSlot(slots - 1) < 0x1F00);
+}
 
 test "the record layout is what the ROM's own writer stores" {
     const a = testing.allocator;

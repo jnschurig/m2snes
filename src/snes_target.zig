@@ -310,17 +310,21 @@ pub fn titleWord(id: u8) TilemapWord {
     };
 }
 
+/// The window's BG2 palette, CGRAM $10-$13, so that a colour scheme can give
+/// the HUD colours of its own. The engine's `!HUD_PAL` is the same number.
+pub const hud_palette: u3 = 1;
+
 /// A window tile id as a BG2 word: character `id` among the objects' (BG2
-/// reads them, `bg2_char_base`), palette 0, no priority, no flip. The
+/// reads them, `bg2_char_base`), `hud_palette`, no priority, no flip. The
 /// engine's `HudPut` writes the same word. Priority 0 because the Game Boy
 /// draws every object over the window, and in mode 1 an object at priority 2
 /// goes under a BG2 word that has the bit.
 pub fn windowWord(id: u8) TilemapWord {
-    return .{ .char = id, .palette = 0, .priority = 0, .flip_h = false, .flip_v = false };
+    return .{ .char = id, .palette = hud_palette, .priority = 0, .flip_h = false, .flip_v = false };
 }
 
 pub fn windowIdFromWord(w: TilemapWord) ?u8 {
-    if (w.palette != 0 or w.priority != 0 or w.flip_h or w.flip_v or w.char > 0xFF) return null;
+    if (w.palette != hud_palette or w.priority != 0 or w.flip_h or w.flip_v or w.char > 0xFF) return null;
     return @intCast(w.char);
 }
 

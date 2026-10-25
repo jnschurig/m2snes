@@ -195,7 +195,8 @@ pub fn build(b: *std.Build) void {
         "src/snes_target.zig", "src/snes_chr.zig", "src/snes_convert.zig",
         "src/snes_layout.zig", "src/snes_screen.zig", "src/snes_render.zig",
         "src/snes_inject.zig", "src/inspect.zig", "src/title_super.zig",
-        "src/gfx_info.zig",
+        "src/gfx_info.zig", "src/colors.zig", "src/gbc_oracle.zig",
+        "src/title_badge.zig",
     };
     var snes_mods: [snes_files.len]*std.Build.Module = undefined;
     for (snes_files, 0..) |f, i| {
@@ -367,6 +368,17 @@ pub fn build(b: *std.Build) void {
     warp_grade_mod.addImport("testrom", testrom_mod);
     warp_grade_mod.addImport("png", png_mod);
     addEngine(b, warp_grade_mod);
+
+    // Colour schemes Step 6: the `schemes` rung's scripts.
+    const scheme_grade_mod = b.createModule(.{
+        .root_source_file = b.path("src/scheme_grade.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scheme_grade_mod.addOptions("build_options", options);
+    scheme_grade_mod.addImport("testrom", testrom_mod);
+    scheme_grade_mod.addImport("png", png_mod);
+    addEngine(b, scheme_grade_mod);
 
     // The residue audit: what the opening leaves behind, and whether we read it.
     const residue_mod = b.createModule(.{
@@ -797,7 +809,7 @@ pub fn build(b: *std.Build) void {
         run.step.dependOn(&crawl_run.step);
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod }) |mod| {
+    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod }) |mod| {
         // Separate from the list above only because these need the working
         // directory set: both find the retail ROM by relative path.
         addAudio(b, mod);
@@ -1625,6 +1637,11 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
         "-DGB_COPYRIGHT_YEAR=\"2025\"",
     };
     mod.addCSourceFile(.{ .file = b.path("src/sbref.c"), .flags = &flags });
+    // The core as SameBoy builds it: without UBSan, which Zig turns on for C in
+    // Debug. Its CPU shifts negative values left (`sub_a_d8`'s `(a - value) <<
+    // 8`), which traps the moment a cartridge runs; the APU-only path never ran
+    // the CPU, so it went unseen until the CGB palette oracle booted a ROM.
+    const core_flags = flags ++ [_][]const u8{"-fno-sanitize=undefined"};
     mod.addCSourceFiles(.{
         .root = b.path(root),
         // Every C file in the core at the pinned tag. The whole thing rather
@@ -1644,7 +1661,7 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
             "Core/symbol_hash.c",  "Core/timing.c",
             "Core/workboy.c",
         },
-        .flags = &flags,
+        .flags = &core_flags,
     });
 }
 
@@ -1653,10 +1670,12 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
 /// `snes_convert.zig`, directly or not, needs both. And the title's "Super"
 /// (metroid2-0b Step 24j), which the converter decodes from its PNG: the file,
 /// and `png.zig` as the one shared module, since a module that imported it by
-/// path as well as by name would hold the same file twice.
+/// path as well as by name would hold the same file twice. The title's L badge
+/// (colour schemes Step 7) comes the same way.
 fn addAudio(b: *std.Build, mod: *std.Build.Module) void {
     mod.addAnonymousImport("audio_bin", .{ .root_source_file = b.path("engine/audio.bin") });
     mod.addAnonymousImport("title_super_png", .{ .root_source_file = b.path("assets/title_super.png") });
+    mod.addAnonymousImport("title_badge_png", .{ .root_source_file = b.path("assets/title_badge.png") });
     mod.addImport("png", png_module.?);
     addShimpkg(b, mod);
 }

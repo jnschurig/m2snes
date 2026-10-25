@@ -37,6 +37,7 @@ const screen = @import("snes_screen.zig");
 const screens = @import("screens.zig");
 const offsets = @import("offsets.zig");
 const convert = @import("snes_convert.zig");
+const colors = @import("colors.zig");
 
 // ---- The Game Boy's side ----------------------------------------------------
 
@@ -300,6 +301,7 @@ pub fn code(c: u8) []const u8 {
         2 => "the new game or play never arrived, or the run outlasted its frames",
         3 => "A on the entry's row did not warp: the menu is still up",
         4 => "the engine was handed a pose it could not run",
+        colors.lua_off_scheme => colors.off_scheme_why,
         20 => "the warp arrived in another bank, or drew another cell than the camera's, or took another cell's scroll flags",
         26 => "the background map over the camera's view is not the Game Boy's",
         21 => "the loaded state ($D808-$D814) is not the Game Boy's after the chain",
@@ -749,6 +751,10 @@ pub const Scenario = enum {
     /// Its explosion runs its four blasts with its record dead throughout, and
     /// it does not come back.
     missile_kill,
+    /// Colour schemes Step 6: L on the title picks `mono` before the new
+    /// game's Start, and play opens in it; a warp from the debug menu keeps
+    /// it, since a warp does not pass the title.
+    scheme,
 };
 
 /// The `missile_kill` scenario's two Metroids, as bank and spawn number.
@@ -796,6 +802,7 @@ pub fn scenarioCode(c: u8) []const u8 {
         48 => "the first Metroid never began its fight, or the menu's kill did not end it",
         49 => "the missiles never killed the second Metroid",
         50 => "the second Metroid's explosion was cut short: it came back, or its record left dead",
+        51 => "CGRAM is not the scheme L picked on the title, in play or after the warp",
         else => code(c),
     };
 }
@@ -990,6 +997,8 @@ pub fn writeRunner(w: *std.Io.Writer) !void {
         \\  if phase == 1 then
         \\    local fc = rd16(R.frames)
         \\    local p = {{}}
+        \\    -- Colour schemes Step 6: L before Start, for a script that sets it.
+        \\    if TITLE_L and fc + 1 == 2 then p.l = true end
         \\    if fc + 1 == 5 or fc + 1 == 6 then
         \\      p.start = true
         \\      starts = starts + 1
@@ -1136,6 +1145,7 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
                 if (e.dest.kind == .queen) break i;
             } else return error.NoQueenEntry;
             const gb = try queen.measure(a, rom, queen_frames[queen_frames.len - 1] + 2);
+            try colors.writeLuaShade(w, colors.default_scheme);
             try w.print("local QUEEN_ROW, VIEW_W, VIEW_H, WIN_LEFT, BAND_TOP = {d}, {d}, {d}, {d}, {d}\nQS = {{", .{
                 debug_tables.warpRow(sorted, i)[1], target.view_w, target.view_h, (target.screen_w - target.view_w) / 2, (target.screen_h - target.view_h) / 2,
             });
@@ -1152,11 +1162,6 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
             try w.print(
                 \\}}
                 \\local OVERSCAN = (239 - 224) // 2
-                \\local function shade(px)
-                \\  local r = (px >> 16) & 0xFF
-                \\  if r > 200 then return 0 elseif r > 120 then return 1
-                \\  elseif r > 40 then return 2 else return 3 end
-                \\end
                 \\-- Every object on the screen, as the pixels it may cover in the
                 \\-- play window. The Game Boy side has none: Samus, and the HUD's
                 \\-- Metroid, are graded elsewhere.
@@ -1225,6 +1230,35 @@ pub fn writeScenarioLua(a: std.mem.Allocator, rom: []const u8, sorted: []const w
         .refill_credits => try writeRefills(a, rom, sorted, mets, true, w),
         .spring_ball => try writeSpringBall(rom, sorted, w),
         .missile_kill => try writeMissileKill(sorted, mets, w),
+        .scheme => {
+            try w.print("TITLE_L = true\nMONO = {{", .{});
+            for (colors.cgramWords(.mono)) |word| try w.print(" {d},", .{word});
+            try w.print(
+                \\ }}
+                \\-- CGRAM's scheme words, as `LoadPalette` writes them: four runs of
+                \\-- four, at these colours.
+                \\local RUNS = {{ 0x00, 0x10, 0x80, 0x90 }}
+                \\local function mono(when)
+                \\  for r = 0, 3 do
+                \\    for i = 0, 3 do
+                \\      local c = (RUNS[r + 1] + i) * 2
+                \\      local got = emu.read(c, cgram) | (emu.read(c + 1, cgram) << 8)
+                \\      if got ~= MONO[r * 4 + i + 1] then
+                \\        fail(51, string.format("%s: CGRAM colour %02x is %04x, mono's %04x", when, RUNS[r + 1] + i, got, MONO[r * 4 + i + 1]))
+                \\      end
+                \\    end
+                \\  end
+                \\end
+                \\local function main()
+                \\  mono("in play")
+                \\  warp(0, 0); wait(10)
+                \\  mono("after the warp")
+                \\  print("mono, picked with L on the title, in play and through a warp")
+                \\  emu.stop(0)
+                \\end
+                \\
+            , .{});
+        },
     }
 
     try writeRunner(w);
@@ -1328,12 +1362,8 @@ fn writeRefills(a: std.mem.Allocator, rom: []const u8, sorted: []const warp.Entr
             try w.print("\"\n", .{});
         }
     }
+    try colors.writeLuaShade(w, colors.default_scheme);
     try w.print(
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\-- Refill `k` for FRAMES frames: in OAM with its record's parts every
         \\-- frame, each coloured pixel of its characters the shade the palette
         \\-- its entry selects gives that index, and at least once in palette 1.

@@ -101,6 +101,36 @@ their respective owners.
     rendering of the Game Boy, but no SameBoy code is in it.
 
 
+1.4 SameBoy's CGB boot ROM palettes
+    https://github.com/LIJI32/SameBoy
+
+    The `gbc` colour scheme's twelve colours (src/colors.zig, compiled in) are
+    the palettes SameBoy's CGB boot ROM picks for Metroid II, copied from
+    BootROMs/cgb_boot.asm. No SameBoy code is in the binary. Its notice is
+    reproduced because of that derivation.
+
+    Expat License
+
+    Copyright (c) 2015-2025 Lior Halphon
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 2. Used at development time only (not in the binary)
 ----------------------------------------------------
 
@@ -109,7 +139,8 @@ tools/ into the ignored vendor/ or reference/ directories, under its own licence
 
 - SameBoy (Expat/MIT, Copyright (c) 2015-2025 Lior Halphon),
   https://github.com/LIJI32/SameBoy. Reference frames for grading the PPU, and
-  the reference player behind `zig build audioab` (src/sbref.c links its APU).
+  the reference player behind `zig build audioab` (src/sbref.c links its APU),
+  and, in GBC mode, the oracle for the `gbc` colour scheme (src/gbc_oracle_run.zig).
 - M2RoS (MIT, above), fetched by tools/get-bank4-sym.sh to name bank 4's
   routines in `zig build audiocost`.
 - Vashy777/metroid2 (MIT), https://github.com/Vashy777/metroid2. An mgbdis dump,

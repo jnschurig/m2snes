@@ -1314,3 +1314,29 @@ from is `docs/phase1.md`, derived from the ROM by `zig build roster`.
     music and sound effects, 2026-10-03.
     The gate's time budget is set in `docs/phase1.md`, and `docs/conformance.md` measures it.
   - Graded by: the hardware playthrough.
+
+---
+
+## After 1.0 (E)
+
+Features past the port, each from its own requirements document in `.local/docs/`. Their own
+`F*` ids are that document's and are named with it.
+
+- [x] **E1. Colour schemes.** `2026-10-07-gbc-color-option`.
+  - Phase: 2+.
+  - Status: **closed 2026-10-24**, its hardware playtest (F6) passed by James. The cart carries two
+    schemes, `gbc` (the Game Boy Color's boot-ROM palettes for Metroid II, the default) and
+    `mono` (the four greys the port had before). `src/colors.zig` holds every colour value.
+    The HUD window has its own palette slot. L on the title steps the selected slot's scheme
+    and recolours in vblank. Each slot keeps its scheme in SRAM (`$701600`, magic `M2CS`), and
+    every read is bounds-checked. Boots that skip the title use the default, and debug warps
+    keep the scheme. An L badge in the bottom border names the scheme shown.
+  - Graded by: `gbc palettes` (SameBoy in GBC mode as the oracle); `schemes`
+    (`src/scheme_grade.zig`: L, slot moves, reboot and power-on, empty and cleared slots,
+    bad magic and out-of-range bytes, the CGRAM write log, and the badge in the border);
+    `warp`'s `scheme` scenario; `snes boot` 15, `fade` 252 and `scenario` 9 (CGRAM holds the
+    default's words); `colors.zig`'s unit tests (each scheme's shades are distinct within a
+    layer, which is what lets the graders read shade from colour); and the FXPak playtest
+    (2026-10-24): the colour title and `GBC` badge on fresh SRAM, L to `MONO`, a saved slot
+    keeping its scheme over a power-cycle, and acid's green flash.
+  - Deferred: the R badge (bottom right, for a future controls config), and a `full` scheme.

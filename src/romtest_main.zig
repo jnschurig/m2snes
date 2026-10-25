@@ -26,6 +26,7 @@ const warp = @import("warp.zig");
 const warp_grade = @import("warp_grade.zig");
 const save_grade = @import("save_grade.zig");
 const debug_tables = @import("debug_tables.zig");
+const scheme_grade = @import("scheme_grade.zig");
 
 const out_dir = "build-out";
 const lua_name = out_dir ++ "/m2snes.lua";
@@ -120,6 +121,14 @@ pub fn main(init: std.process.Init) !void {
     try dir.writeFile(init.io, .{ .sub_path = "m2snes-pause-combo.lua", .data = pause_combo.written() });
     try dir.writeFile(init.io, .{ .sub_path = "m2snes-pause-debug.lua", .data = pause_debug.written() });
     try dir.writeFile(init.io, .{ .sub_path = "m2snes-graded.sfc", .data = graded.bytes });
+    // And the `schemes` rung (colour schemes Step 6), for the shipped cart.
+    for (std.enums.values(scheme_grade.Run)) |r| {
+        var sl: std.Io.Writer.Allocating = .init(gpa);
+        defer sl.deinit();
+        try scheme_grade.writeLua(bytes, r, &sl.writer);
+        const name = try std.fmt.allocPrint(gpa, "m2snes-schemes-{s}.lua", .{@tagName(r)});
+        try dir.writeFile(init.io, .{ .sub_path = name, .data = sl.written() });
+    }
     // And the scenarios (1.0 Step 3), for the `--debug` cart.
     for (scenario.scenarios) |sc| {
         var sl: std.Io.Writer.Allocating = .init(gpa);
@@ -234,6 +243,7 @@ pub fn main(init: std.process.Init) !void {
     try out.print("wrote {s}/m2snes-load.lua: slot 0 holds the recording's first save; Start loads it\n", .{out_dir});
     try out.print("wrote {s}/m2snes-death.lua: two deaths, left on the timer and on Start\n", .{out_dir});
     try out.print("wrote {s}/m2snes-title.lua: the file select, against the Game Boy's\n", .{out_dir});
+    try out.print("wrote {s}/m2snes-schemes-*.lua: each slot's colour scheme on the title, L and Start\n", .{out_dir});
     try out.print("wrote {s}/m2snes-pause.lua: the pause, against the Game Boy's\n", .{out_dir});
     try out.print("wrote {s}/m2snes-pause-combo.lua and -debug.lua: the debug menu's chord in play, for m2snes.sfc and m2snes-debug.sfc\n", .{out_dir});
     try out.print("wrote {s}/m2snes-scenario-*.lua: {d} scenarios set up through the debug menu, for m2snes-debug.sfc\n", .{ out_dir, scenario.scenarios.len });

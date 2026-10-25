@@ -42,6 +42,7 @@ const entity = @import("entity.zig");
 const save = @import("save.zig");
 const aram_image = @import("aram_image.zig");
 const title_super = @import("title_super.zig");
+const title_badge = @import("title_badge.zig");
 const debug_tables = @import("debug_tables.zig");
 const gfx_info = @import("gfx_info.zig");
 const warp = @import("warp.zig");
@@ -992,7 +993,8 @@ pub const Set = struct {
     /// that decides a placement. metroid2-audio Step 16a.
     aram: []Blob,
     /// "Super" on the title, Step 24j, in `title_super` order: characters,
-    /// palette, map patch, so a blob's index is its id. Not the ROM's.
+    /// palette, map patch, so a blob's index is its id; then the L badge's
+    /// three in the same order (colour schemes Step 7). Not the ROM's.
     title_art: []Blob = &.{},
     /// The debug menu's lists, 1.0 Steps 4 and 5b, in `debug_tables.Which` order.
     debug: []Blob = &.{},
@@ -1566,13 +1568,18 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
     return set;
 }
 
-/// `assets/title_super.png` as the three blobs `UploadTitleArt` reads.
+/// `assets/title_super.png` as the three blobs `UploadTitleArt` reads, and
+/// `assets/title_badge.png` as the three after them (colour schemes Step 7).
 fn titleArtBlobs(a: std.mem.Allocator) ![]Blob {
     const b = try title_super.blobs(a);
-    const out = try a.alloc(Blob, 3);
+    const l = try title_badge.blobs(a);
+    const out = try a.alloc(Blob, 6);
     out[0] = .{ .name = "title_super_chr", .bytes = b.chr };
     out[1] = .{ .name = "title_super_pal", .bytes = b.pal };
     out[2] = .{ .name = "title_super_map", .bytes = b.map };
+    out[3] = .{ .name = "title_badge_chr", .bytes = l.chr };
+    out[4] = .{ .name = "title_badge_pal", .bytes = l.pal };
+    out[5] = .{ .name = "title_badge_map", .bytes = l.map };
     return out;
 }
 

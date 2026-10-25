@@ -144,6 +144,19 @@ arch 65816
 !BG3SC_VALUE   = (!BG3_MAP>>10)<<2
 !BG2_MAP       = $0C00
 !BG2SC_VALUE   = (!BG2_MAP>>10)<<2
+; The window's BG2 palette, CGRAM $10-$13, so a colour scheme can give the HUD
+; colours of its own (`snes_target.hud_palette`). `!HUD_ATTR` is the high byte
+; of every window word: the palette, no priority, no flip.
+!HUD_PAL       = 1
+!HUD_ATTR      = !HUD_PAL<<2
+; The colour schemes `SchemeTable` holds (`colors.count`), the one fresh SRAM
+; and every boot that skips the title get (`colors.default_scheme`), and the
+; CGRAM words each one is (`colors.cgramWords`). An id is what SRAM stores, so
+; it never changes meaning.
+!SCHEMES        = 2
+!DEFAULT_SCHEME = 1             ; `gbc`
+!SCHEME_WORDS   = 16
+assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
 !BG12_CHAR_BASE = $1000
 ; BG34NBA: BG3 characters at word $0000.
 !BG34NBA_VALUE = $00
@@ -442,6 +455,18 @@ arch 65816
 !TITLE_ART_MAP    = 2
 !TITLE_ART_HEADER = 6           ; `title_super.map_header_bytes`
 !TITLE_ART_CGRAM  = 7*16        ; BG palette 7, `title_super.palette`
+; And the L badge's, after them, mirrored from `src/title_badge.zig` (colour
+; schemes Step 7): the characters, the palette, and every scheme's patch of
+; BG1 map words, in scheme id order, each `!BADGE_ROWS` rows of `!BADGE_COLS`.
+!TITLE_BADGE_CHR  = 3
+!TITLE_BADGE_PAL  = 4
+!TITLE_BADGE_MAP  = 5
+!BADGE_CHR_FIRST  = $80         ; `title_badge.chr_first`
+!BADGE_CGRAM      = 6*16        ; BG palette 6, `title_badge.palette`
+!BADGE_MAP_AT     = (23*32)+6   ; `title_badge.patch`: its word offset in BG1's map
+!BADGE_COLS       = 6
+!BADGE_ROWS       = 3
+!BADGE_BYTES      = !BADGE_COLS*!BADGE_ROWS*2  ; one scheme's patch
 
 ; Blob ids within !CLASS_PHYSICS, mirrored from src/physics.zig's `Which`.
 !PHYS_FALL       = 0
@@ -2926,6 +2951,11 @@ ConstBlobMovesGb    = !BLOB_MOVES_GB
 ; `!ActiveSlot` picks one, through `!SlotP`.
 !SRAM         = $700000
 !SRAM_SPAWN   = $701000
+; Colour schemes Step 6: past the spawn flags, in the Game Boy's free $B600-$BFFF,
+; `SchemeMagic` and then one scheme id a slot (`colors.sram_at`). The title reads
+; a slot's id only while the slot holds a game, and checks it against `!SCHEMES`.
+!SRAM_SCHEME  = $701600
+!SCHEME_MAGIC_LEN = 4
 !SAVE_MAGIC_LEN = 8
 !SAVE_COOLDOWN = $FF            ; 01:$583E
 !SAVE_TEXT_Y  = $98             ; 01:$5849 and $5864
@@ -3531,6 +3561,13 @@ ConstCollBlobs = !COLL_BLOBS
 ; NMI drains 2 768 bytes and returns on line 253 of 261. The queue moved out of
 ; $07A1-$07CA, which is free now, to have the room.
 !XferEnd      = $07A0           ; bytes of `!XferQ` in use
+; Colour schemes: from $07A1 on.
+!HudAttr      = $07A1           ; the status bar's words' high byte (`BarPut`)
+!Scheme       = $07A2           ; the active colour scheme's id (`LoadPalette`)
+!SchemeDue    = $07A3           ; NMI owes CGRAM the scheme's words (`SchemeNmi`)
+!SchemeSlot   = $07A4           ; the slot the title last loaded a scheme for
+!SlotGame     = $07A5           ; 3: nonzero while the slot holds a game (`SlotIsGame`)
+!BadgeMap     = $07A8           ; 3: the L badge's map blob, for `BadgeShow` in NMI
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -3980,6 +4017,13 @@ ConstBlkEvictX   = !BLK_EVICT_X
 ConstBlkSize     = !BLK_SIZE
 ConstBlkRespawnIds = !BLK_RESPAWN_IDS
 ConstPlayPri     = !PLAY_PRI
+ConstHudPal      = !HUD_PAL
+ConstSchemes     = !SCHEMES
+ConstDefaultScheme = !DEFAULT_SCHEME
+ConstSchemeWords = !SCHEME_WORDS
+ConstSramScheme  = !SRAM_SCHEME&$FFFF
+ConstSchemeMagicLen = !SCHEME_MAGIC_LEN
+VarScheme        = !Scheme
 VarScreenPri     = !ScreenPri
 
 VarItemStage     = !ItemStage
@@ -4080,6 +4124,15 @@ ConstClassTitleArt = !CLASS_TITLE_ART
 ConstTitleArtHeader = !TITLE_ART_HEADER
 ConstTitleArtCgram = !TITLE_ART_CGRAM
 ConstTitleArtMap = !TITLE_ART_MAP
+; Colour schemes Step 7's, against `title_badge.zig`.
+ConstTitleBadgeChr = !TITLE_BADGE_CHR
+ConstTitleBadgePal = !TITLE_BADGE_PAL
+ConstTitleBadgeMap = !TITLE_BADGE_MAP
+ConstBadgeChrFirst = !BADGE_CHR_FIRST
+ConstBadgeCgram  = !BADGE_CGRAM
+ConstBadgeMapAt  = !BADGE_MAP_AT
+ConstBadgeCols   = !BADGE_COLS
+ConstBadgeRows   = !BADGE_ROWS
 ConstClassDebug = !CLASS_DEBUG
 ConstDebugBlobMetroids = !DEBUG_BLOB_METROIDS
 ConstDebugQueenBank = !DEBUG_QUEEN_BANK
@@ -4369,7 +4422,7 @@ Reset:
         jsr ClearVideoMemory
         jsr ApplySetup
         jsr InitHdma
-        jsr LoadPalette
+        jsl LoadDefaultPalette  ; bank 1
         ; **`InitOam` moved in front of `InitState` in Step 7**, because the
         ; title screen is shown between them and a screen with 128 unparked
         ; sprites on it is a screen with a row of stray tiles across the top.
@@ -5383,6 +5436,12 @@ assert WindowBandsEnd-WindowBands <= !BANDS_ROOM
 ; The top border is one entry, so its main-screen byte is the table's second.
 assert !BAND_TOP <= 127
 !BAND_TOP_TM = !Bands+1
+; And the bottom border's, colour schemes Step 7: one entry, after the top's
+; one, the play field's two and the window's one, so its byte is the tenth.
+; The title's L badge turns BG1 on there.
+assert !BAND_BOTTOM <= 127
+assert WindowBandsEnd-WindowBands == 11
+!BAND_BOTTOM_TM = !Bands+9
 ; And `!BAND_PLAY_TM`/`!BAND_HUD_TM`, defined with the death that uses them: the
 ; play field is two entries behind the top border's one, so its second byte is
 ; the table's fourth and the window's byte, the next entry's, is its eighth.
@@ -5392,52 +5451,6 @@ assert !VIEW_H-!HUD_WY <= 127
 ; window must still need two play entries and one window entry.
 assert !HUD_WY_UP > 127 && !HUD_WY_UP < !HUD_WY
 ConstTmPlay   = !TM_PLAY
-
-; ---------------------------------------------------------------------------
-; BG3's palette 0, from the four colours the builder patched into `BootRecord`.
-;
-; Entry 0 is written even though the SNES treats a background colour 0 as
-; transparent, because entry 0 is also the backdrop - and on the Game Boy a
-; background pixel of index 0 is opaque and drawn with BGP's first field.
-; Writing the same colour into both is what makes the two agree.
-; ---------------------------------------------------------------------------
-LoadPalette:
-        sep #$20
-        stz !CGADD
-        ldx #$0000
--       lda BootPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0008
-        bne -
-        ; The object palettes. CGRAM's second half belongs to the sprites: the
-        ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
-        ; go into it and the one after. Entry 0 of each is written and never
-        ; seen - a sprite pixel of colour 0 is transparent - which is the one
-        ; place where the SNES and the Game Boy agree without being made to.
-        ;
-        ; **An object palette is sixteen colours**, so the one after is colour
-        ; $90, which is what `PutObject`'s palette 1 reads. Until 1.0 Step 8b's
-        ; playtest OBP1 went to $84, straight after OBP0's four, and palette 1
-        ; was black: a frozen enemy, a stunned one's flash and a blinking drop
-        ; drew black on the black play field. `snes boot` code 15 reads $90.
-        lda.b #$80
-        sta !CGADD
-        ldx #$0000
--       lda BootObjPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0008
-        bne -
-.obp1                                   ; the warp rung's `refills` fault patches this
-        lda.b #$90
-        sta !CGADD
--       lda BootObjPalette,x
-        sta !CGDATA
-        inx
-        cpx #$0010
-        bne -
-        rts
 
 ; ---------------------------------------------------------------------------
 ; Park every OAM slot off-screen.
@@ -5645,6 +5658,7 @@ TitleScreen:
 +       jsr UploadTitleChr
         jsl TitleResolve        ; the credits set, for the menu (bank 1)
         jsl TitleSeedSlot       ; `bootRoutine`'s slot (Step 24i, bank 1)
+        jsl TitleSchemeSeed     ; and its colour scheme, in CGRAM (colour schemes Step 6)
         jsl UploadTitleArt      ; "Super", and BG1 on the play band (Step 24j)
 
 ; ---- The tilemap ----------------------------------------------------------
@@ -5793,6 +5807,7 @@ TitleFrame:
         eor.b #$FF              ; $41E0 `XOR $FF`
         sta.w !TitleShowClear
 +       jsl TitleSlotStep       ; $41E5-$4223, Right and Left, in bank 1
+        jsl TitleSchemeStep     ; L, and the slot's scheme (colour schemes Step 6)
 
         ; $4226-$4243: clear is selected for as long as Down is held with the
         ; option shown. `BIT 7` of the held byte: a mask, so Down with another
@@ -5852,6 +5867,7 @@ TitleFrame:
         sta.l !SRAM,x           ; $42BD `LD (HL+),A`
         sta.l !SRAM+1,x         ; $42BE `LD (HL),A`
         stz.w !TitleShowClear   ; $42C3
+        jsl TitleSchemeClear    ; an empty slot shows the default (colour schemes Step 6)
         rep #$30
         clc
         rts
@@ -5864,20 +5880,10 @@ TitleFrame:
 ; is not recorded in `!Song`, and should not be: `!Song` is `currentRoomSong`,
 ; and the fanfare is what the title asks for once, not what the room asks for.
 ;
-; **The slot check is ported as it is, which is broken.** $426D-$4281 walk the
-; ROM from `saveFile_magicNumber` (00:$2083) and the slot together until a byte
-; differs, and then test the *ROM's* byte against $08 rather than counting what
-; matched. A slot is a game when the first byte that differs sits at or above
-; $08 in the ROM. A blank slot differs at once, on the magic's $01, and is not.
-; A real one matches all eight and runs on into `samus_damagePoseTable` and
-; `spiderDirectionTable`, which follow the magic in bank 0, until the record
-; stops agreeing with them -- usually on its first byte, against a table byte of
-; $0F. So a record whose bytes happen to match those tables for a while can come
-; out as no game at all, and so it does here.
-;
-; The walk stops at the end of the spider table, 102 bytes in, where the
-; Game Boy's would carry on. Only a slot that matched the ROM for all 102 could
-; tell.
+; The slot check is `SlotIsGame`'s, in bank 1 since colour schemes Step 6 so
+; the title can ask it of every slot; it is broken, and ported as it is. Start
+; also keeps the scheme the title shows for the slot (`SchemeStore`), which is
+; how an empty slot's first game gets one.
 ; ---------------------------------------------------------------------------
 TitleStart:
         sep #$20
@@ -5887,69 +5893,12 @@ TitleStart:
         %audio_put(!REQ_SFX_SQUARE1, $05425C)
         %audio_request(!REQ_SONG, $12, $054261)
         stz !LoadingFromFile    ; $4264
-        ; The two tables after the magic, in the ROM's order.
-        lda.b #!CLASS_PHYSICS
-        sta !ArgClass
-        lda.b #!PHYS_SPIDER_DIRS
-        sta !ArgId
-        jsr FindBlob
-        bcs +
-        jmp Fatal
-+       rep #$20
-        lda !Blob
-        sta !TabP
-        lda !BlobLen
-        sta.w !LoadIdx
-        sep #$20
-        lda !Blob+2
-        sta !TabP+2
-        lda.b #!PHYS_DMG_POSE
-        sta !ArgId
-        jsr FindBlob            ; and `!Blob` is the damage table from here
-        bcs +
-        jmp Fatal
-+       sep #$20                ; `FindBlob` returns wide
-        jsl SlotRecP            ; $4270-$427A: the slot's record, as `[!SlotP]`
-        ldx.w #$0000
-.byte
-        cpx.w #!SAVE_MAGIC_LEN
-        bcs .tables
-        lda.l SaveMagic,x
-        bra .have
-.tables
-        rep #$20
-        txa
-        sec
-        sbc.w #!SAVE_MAGIC_LEN
-        cmp !BlobLen
-        bcs .spider
-        tay
-        sep #$20
-        lda [!Blob],y
-        bra .have
-.spider
-        sbc !BlobLen            ; the carry is set
-        cmp.w !LoadIdx
-        bcs .ranOut
-        tay
-        sep #$20
-        lda [!TabP],y
-.have
-        sta !Tmp                ; $427D `LD B,A`
-        txy
-        cmp [!SlotP],y          ; $427E-$4280
-        bne .differs
-        inx
-        bra .byte
-.ranOut
-        sep #$20
-.differs
-        lda !Tmp                ; $4283 `LD A,B`
-        cmp.b #$08              ; $4284
+        jsl SlotIsGame          ; $426D-$4281, in bank 1 (colour schemes Step 6)
         bcc +
         lda.b #$FF
         sta !LoadingFromFile    ; $428A
-+       lda.w !ActiveSlot       ; $428D `activeSaveSlot`
++       jsl SchemeStore         ; the scheme the title shows, kept for the slot
+        lda.w !ActiveSlot       ; $428D `activeSaveSlot`
         sta.l !SRAM_COUNTER     ; $4290
         rep #$30
         rts
@@ -13171,6 +13120,7 @@ NMI:
         jsr WriteWindow
         jsl QueenNmi            ; 1.0 Step 6, bank 1: her head, and the bands `QueenPass` built
 .readout
+        jsl SchemeNmi           ; the title's recolour (colour schemes Step 6, bank 1)
         sep #$20
         lda.w !ReadoutFontDue
         rep #$30
@@ -20140,7 +20090,7 @@ PoseBombed:
 !REGION_VERSION     = 1
 !REGION_CLASSES     = 17        ; snes_layout.Class, including `directory`
 !REGION_ENTRY_BYTES = 8
-!BOOT_VERSION       = 17
+!BOOT_VERSION       = 18
 !TILE_TABLES        = 10        ; screens.tiletable_order
 ; How many tiles a record may force into `!TilemapBuf` after the room is drawn.
 ; See `BootWorld` and `SeedWorld`; 168 is what fits between $00FC00 and the boot
@@ -23188,12 +23138,24 @@ LoadHud:
         rep #$30
         rts
 
-; One window tile id as a BG2 tilemap word: character `id`, palette 0, no
-; priority, no flip. The Game Boy's window has none of those bits to carry.
-; in: 8-bit A, VMADD already pointed. Preserves X and Y.
+; One window tile id as a BG2 tilemap word: character `id`, `!HUD_ATTR` (the
+; HUD's palette, no priority, no flip). The Game Boy's window has none of those
+; bits to carry. `snes_target.windowWord` is the same word.
+; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
 HudPut:
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.b #!HUD_ATTR
+        sta !VMDATAL+1
+        rts
+
+; The status bar's cell: `HudPut`, but with `!HudAttr`'s high byte, which
+; `UpdateStatusBar` sets with `!HudBase`. In the Queen's room the bar is a row
+; of BG3's (`vramDest_queenStatusBar`), which is the play field's palette 0.
+; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
+BarPut:
+        sta !VMDATAL
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rts
 
 ; ---------------------------------------------------------------------------
@@ -23263,12 +23225,12 @@ HudTens:
         lsr a
         clc
         adc.b #!HUD_DIGIT
-        jmp HudPut
+        jmp BarPut
 HudOnes:
         and.b #$0F
         clc
         adc.b #!HUD_DIGIT
-        jmp HudPut
+        jmp BarPut
 
 ; ---------------------------------------------------------------------------
 ; The Game Boy's `DAA` after an addition, exactly: +$60 on a carry or above $99,
@@ -23384,13 +23346,19 @@ UpdateStatusBar:
         ; $497D-$498B: the Queen room's background row, or the window's (1.0
         ; Step 6). Outside her room the Game Boy rewrites `rWX` to 7 here,
         ; which is BG2's scroll, `QueenNmi`'s to put back.
+        ; And the words' high byte with it: the play field's palette on BG3,
+        ; the HUD's on BG2 (`BarPut`).
         rep #$20
         lda.w #!BG3_MAP+!QUEEN_BAR_ROW  ; $497D `vramDest_queenStatusBar`
         sta.w !HudBase
         sep #$20
+        stz.w !HudAttr
         lda !RoomMode
         cmp.b #!QUEEN_ROOM      ; $4983
         beq +
+.hudAttr                                ; the cold boot rung's fault patches this
+        lda.b #!HUD_ATTR
+        sta.w !HudAttr
         rep #$20
         lda.w #!BG2_MAP         ; $498B `vramDest_statusBar`
         sta.w !HudBase
@@ -23403,11 +23371,11 @@ UpdateStatusBar:
         sep #$20
         ldx.w #!HUD_TANKS-1
 -       lda.w !HudTanks,x       ; $498E: tank 5 is the leftmost cell
-        jsr HudPut
+        jsr BarPut
         dex
         bpl -
         lda.b #!HUD_DASH        ; $499D
-        jsr HudPut
+        jsr BarPut
         lda.w !DispHealthLo     ; $49A0
         jsr HudTens
         lda.w !DispHealthLo     ; $49AA
@@ -24492,21 +24460,15 @@ BootTileTable:
         db $FF
 BootDoorIndex:
         dw $FFFF
-BootPalette:
-        dw $FFFF,$FFFF,$FFFF,$FFFF
+        ; Version 18 dropped the palettes that sat here and after the sheet id
+        ; (four BG words, then OBP0 and OBP1): `SchemeTable` holds every
+        ; scheme's colours now, and `LoadPalette` was their only reader.
 BootSamusChr:
         ; The `chr_obj` asset id of the power-suit sheet. The original loads it
         ; outside every door script - `loadGame_loadGraphics`, 00:05FD, copies
         ; $B00 bytes to vramDest_samus - so replaying a script does not put it
         ; in VRAM and the engine has to ask for it by name.
         db $FF
-BootObjPalette:
-        ; OBP0 then OBP1, as four SNES colours each. Two palettes rather than
-        ; one because `drawSamusSprite` sets the OBP1 bit on every part when
-        ; Samus is in acid or invulnerable, and a palette that was not loaded
-        ; would make the damage flash black rather than a flash.
-        dw $FFFF,$FFFF,$FFFF,$FFFF
-        dw $FFFF,$FFFF,$FFFF,$FFFF
 BootSamusY:
         ; Where Samus starts, as a whole world coordinate on each axis: the
         ; screen number in the high byte and the pixel within it in the low one.
@@ -25144,15 +25106,126 @@ UploadTitleArt:
         lda.b #!TM_BG1
         tsb.w !BAND_PLAY_TM
         tsb.w !BAND_PLAY_TM2
+        ; Colour schemes Step 7: the L badge. Its characters from their own
+        ; first id, its palette into BG palette 6, the map blob's address kept
+        ; for NMI, the scheme's patch, and BG1 on the bottom border's band.
+        sep #$20
+        lda.b #!TITLE_BADGE_CHR
+        jsr TitleArtFind
+        sep #$20
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!BG12_CHAR_BASE+(!BADGE_CHR_FIRST*16)
+        sta !VMADDL
+        sep #$20
+        lda.b #$01              ; two registers, incrementing source
+        sta !DMAP0
+        lda.b #$18
+        sta !BBAD0
+        jsr TitleArtDma
+        sep #$20
+        lda.b #!TITLE_BADGE_PAL
+        jsr TitleArtFind
+        sep #$20
+        lda.b #!BADGE_CGRAM
+        sta !CGADD
+        stz !DMAP0              ; one register, incrementing source
+        lda.b #$22
+        sta !BBAD0
+        jsr TitleArtDma
+        sep #$20
+        lda.b #!TITLE_BADGE_MAP
+        jsr TitleArtFind
+        rep #$20
+        lda !Blob
+        sta.w !BadgeMap
+        sep #$20
+        lda !Blob+2
+        sta.w !BadgeMap+2
+        jsl BadgeShow
+        sep #$20
+        lda.b #!TM_BG1
+        tsb.w !BAND_BOTTOM_TM
         rep #$30
+        rtl
+
+; Colour schemes Step 7. The L badge for `!Scheme`: its patch, row by row into
+; BG1's map, from the blob `UploadTitleArt` found. In forced blank, or from
+; NMI in vblank (`SchemeNmi`), which is why the blob's address is the one kept
+; in `!BadgeMap` rather than `FindBlob`'s, whose scratch the title's frame may
+; be using. DMA channel 0, as NMI's other transfers use it. Any widths; keeps
+; them.
+BadgeShow:
+        php
+        rep #$30
+        lda.w !Scheme
+        and.w #$00FF
+        tax
+        lda.w !BadgeMap
+-       dex                     ; the scheme's patch: `!BADGE_BYTES` an id
+        bmi +
+        clc
+        adc.w #!BADGE_BYTES
+        bra -
++       sta !A1T0L
+        sep #$20
+        lda.w !BadgeMap+2
+        sta !A1B0
+        lda.b #$01              ; two registers, incrementing source
+        sta !DMAP0
+        lda.b #$18
+        sta !BBAD0
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!READOUT_MAP+!BADGE_MAP_AT
+        ldy.w #!BADGE_ROWS
+.row
+        sta !VMADDL
+        pha
+        lda.w #!BADGE_COLS*2
+        sta !DAS0L
+        sep #$20
+        lda.b #$01              ; the source runs on from the row before
+        sta !MDMAEN
+        rep #$20
+        pla
+        clc
+        adc.w #32               ; the map's next row
+        dey
+        bne .row
+        plp
         rtl
 
 ; "Super" out of BG1's map again, as the title leaves: the same patch, zeroed.
 ; Under forced blank. The characters and palette stay; nothing else reads them.
+; The L badge's go the same way.
 ClearTitleArt:
         rep #$30
         lda.w #$0000
         jsr TitleArtMap
+        ; And the L badge's patch (colour schemes Step 7), and BG1 off the
+        ; bottom border's band again.
+        sep #$20
+        lda.b #$80
+        sta !VMAIN
+        rep #$20
+        lda.w #!READOUT_MAP+!BADGE_MAP_AT
+        ldy.w #!BADGE_ROWS
+.row
+        sta !VMADDL
+        ldx.w #!BADGE_COLS
+-       stz !VMDATAL            ; a word: A is 16-bit
+        dex
+        bne -
+        clc
+        adc.w #32
+        dey
+        bne .row
+        sep #$20
+        stz.w !BAND_BOTTOM_TM
+        rep #$30
         rtl
 
 ; The map patch into BG1's map, each of its words ANDed with A (16-bit): $FFFF
@@ -25351,6 +25424,271 @@ SlotSpawnP:
         pla
         plp
         rtl
+
+; ---------------------------------------------------------------------------
+; 05:$426D-$4281, `TitleStart`'s check of the selected slot, on its own since
+; colour schemes Step 6 so the title can ask it of each slot. Carry set when
+; the slot holds a game. Writes scratch only (`!Blob`, `!TabP`, `!LoadIdx`,
+; `!Tmp`, `!SlotP`), so it runs with NMI off. Any widths; keeps them.
+;
+; **The slot check is ported as it is, which is broken.** $426D-$4281 walk the
+; ROM from `saveFile_magicNumber` (00:$2083) and the slot together until a byte
+; differs, and then test the *ROM's* byte against $08 rather than counting what
+; matched. A slot is a game when the first byte that differs sits at or above
+; $08 in the ROM. A blank slot differs at once, on the magic's $01, and is not.
+; A real one matches all eight and runs on into `samus_damagePoseTable` and
+; `spiderDirectionTable`, which follow the magic in bank 0, until the record
+; stops agreeing with them -- usually on its first byte, against a table byte of
+; $0F. So a record whose bytes happen to match those tables for a while can come
+; out as no game at all, and so it does here.
+;
+; The walk stops at the end of the spider table, 102 bytes in, where the
+; Game Boy's would carry on. Only a slot that matched the ROM for all 102 could
+; tell.
+; ---------------------------------------------------------------------------
+SlotIsGame:
+        php
+        sep #$20
+        rep #$10
+        ; The two tables after the magic, in the ROM's order.
+        lda.b #!CLASS_PHYSICS
+        sta !ArgClass
+        lda.b #!PHYS_SPIDER_DIRS
+        sta !ArgId
+        jsl FindBlobLong
+        bcs +
+        jml Fatal
++       rep #$20
+        lda !Blob
+        sta !TabP
+        lda !BlobLen
+        sta.w !LoadIdx
+        sep #$20
+        lda !Blob+2
+        sta !TabP+2
+        lda.b #!PHYS_DMG_POSE
+        sta !ArgId
+        jsl FindBlobLong        ; and `!Blob` is the damage table from here
+        bcs +
+        jml Fatal
++       sep #$20                ; `FindBlob` returns wide
+        jsl SlotRecP            ; $4270-$427A: the slot's record, as `[!SlotP]`
+        ldx.w #$0000
+.byte
+        cpx.w #!SAVE_MAGIC_LEN
+        bcs .tables
+        lda.l SaveMagic,x
+        bra .have
+.tables
+        rep #$20
+        txa
+        sec
+        sbc.w #!SAVE_MAGIC_LEN
+        cmp !BlobLen
+        bcs .spider
+        tay
+        sep #$20
+        lda [!Blob],y
+        bra .have
+.spider
+        sbc !BlobLen            ; the carry is set
+        cmp.w !LoadIdx
+        bcs .ranOut
+        tay
+        sep #$20
+        lda [!TabP],y
+.have
+        sta !Tmp                ; $427D `LD B,A`
+        txy
+        cmp [!SlotP],y          ; $427E-$4280
+        bne .differs
+        inx
+        bra .byte
+.ranOut
+        sep #$20
+.differs
+        lda !Tmp                ; $4283 `LD A,B`
+        cmp.b #$08              ; $4284
+        bcc .no
+        plp
+        sec
+        rtl
+.no
+        plp
+        clc
+        rtl
+
+; ---------------------------------------------------------------------------
+; Colour schemes Step 6: the title's scheme. Each slot keeps its own in SRAM
+; (`!SRAM_SCHEME`), read only while the slot holds a game: an empty slot shows
+; the default, and L there changes what is shown until the slot changes or
+; Start keeps it. L steps the scheme; on a slot holding a game it is kept at
+; once, so it survives a power-off before the next save.
+;
+; Which slots hold a game is asked once, at the title's setup, with NMI off as
+; `SlotIsGame` needs, and kept in `!SlotGame`. Only the clear changes the
+; answer while the title is up. A recolour once the screen is on goes through
+; `!SchemeDue`, and NMI loads it in vblank.
+; ---------------------------------------------------------------------------
+
+; From `TitleScreen`, in forced blank with NMI off: every slot asked, and the
+; selected one's scheme loaded. Any widths; keeps them.
+TitleSchemeSeed:
+        php
+        sep #$30
+        lda.w !ActiveSlot
+        pha
+        lda.b #!SLOT_LAST
+.slot
+        sta.w !ActiveSlot       ; `SlotIsGame` asks the selected slot
+        jsl SlotIsGame
+        lda.b #$00
+        rol a
+        ldx.w !ActiveSlot
+        sta.w !SlotGame,x
+        dex
+        txa
+        bpl .slot
+        pla
+        sta.w !ActiveSlot
+        sta.w !SchemeSlot
+        jsr SlotScheme
+        sta.w !Scheme
+        jsl LoadPalette
+        plp
+        rtl
+
+; One title frame's, after Right and Left: the slot's scheme when the slot
+; moved, then L alone on its edge. Any widths; keeps them.
+TitleSchemeStep:
+        php
+        sep #$30
+        lda.w !ActiveSlot
+        cmp.w !SchemeSlot
+        beq .l
+        sta.w !SchemeSlot
+        jsr SlotScheme
+        sta.w !Scheme
+        jsl SchemeLater
+.l
+        rep #$20
+        lda !InputRisingEdge
+        cmp.w #!PAD_L
+        bne .out
+        sep #$20
+        lda.w !Scheme
+        inc a
+        cmp.b #!SCHEMES
+        bcc +
+        lda.b #$00
++       sta.w !Scheme
+        jsl SchemeLater
+        ldx.w !ActiveSlot
+        lda.w !SlotGame,x
+        beq .out
+.keep                                   ; the `schemes` rung's fault patches this
+        jsl SchemeStore
+.out
+        plp
+        rtl
+
+; The clear (05:$42A6) has emptied the slot, so it shows the default. Any
+; widths; keeps them.
+TitleSchemeClear:
+        php
+        sep #$30
+        ldx.w !ActiveSlot
+        stz.w !SlotGame,x
+        lda.b #!DEFAULT_SCHEME
+        sta.w !Scheme
+        jsl SchemeLater
+        plp
+        rtl
+
+; The scheme a slot plays in: its SRAM id when the slot holds a game, the
+; magic is there and the id names a scheme this cart has, and otherwise the
+; default. An id is never used unchecked, so a save from a cart with more
+; schemes, or a corrupt one, plays in the default.
+; in: A the slot. out: A the scheme. A and the index 8-bit.
+SlotScheme:
+        tay
+        lda.w !SlotGame,y
+        beq .default
+        jsr SchemeMagicOk
+        bcc .default
+        tyx
+        lda.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        cmp.b #!SCHEMES
+.bound                                  ; the `schemes` rung's fault patches this
+        bcc +
+.default
+        lda.b #!DEFAULT_SCHEME
++       rts
+
+; Carry set when SRAM holds `SchemeMagic`. A and the index 8-bit.
+SchemeMagicOk:
+        ldx.b #!SCHEME_MAGIC_LEN-1
+-       lda.l !SRAM_SCHEME,x
+        cmp.l SchemeMagic,x
+        bne .bad
+        dex
+        bpl -
+        sec
+        rts
+.bad                                    ; the `schemes` rung's fault patches this
+        clc
+        rts
+
+; `!Scheme` kept for the selected slot. The first write over SRAM without the
+; magic sets every slot's id to the default before the magic goes in, so what
+; was in SRAM before does not become another slot's scheme. From the title's L
+; and from `TitleStart`. Any widths; keeps them.
+SchemeStore:
+        php
+        sep #$30
+        jsr SchemeMagicOk
+        bcs .id
+        ldx.b #!SLOT_LAST
+        lda.b #!DEFAULT_SCHEME
+-       sta.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        dex
+        bpl -
+        ldx.b #!SCHEME_MAGIC_LEN-1
+-       lda.l SchemeMagic,x
+        sta.l !SRAM_SCHEME,x
+        dex
+        bpl -
+.id
+        ldx.w !ActiveSlot
+        lda.w !Scheme
+        sta.l !SRAM_SCHEME+!SCHEME_MAGIC_LEN,x
+        plp
+        rtl
+
+; NMI owes CGRAM the scheme in `!Scheme`. Any widths; keeps them.
+SchemeLater:
+        php
+        sep #$20
+        lda.b #$01
+        sta.w !SchemeDue
+        plp
+        rtl
+
+; From NMI, in vblank: the scheme `SchemeLater` asked for, into CGRAM, and
+; its name on the L badge (Step 7). Leaves A 8-bit.
+SchemeNmi:
+        sep #$20
+        lda.w !SchemeDue
+        beq +
+        stz.w !SchemeDue
+        jsl LoadPalette
+.badge                                  ; the `schemes` rung's fault patches this
+        jmp BadgeShow           ; whose `rtl` is this one's
++       rtl
+
+; `colors.sram_magic`: SRAM holds slot schemes.
+SchemeMagic:
+        db "M2CS"
 
 ; ---------------------------------------------------------------------------
 ; Step 24h. The draw half of `titleScreenRoutine` (05:4118): `TitleFrame`'s,
@@ -27621,7 +27959,8 @@ PauseShow:
 ; ---------------------------------------------------------------------------
 ; 01:$4A0F, `VBlank_updateStatusBar`'s paused arm: the L counter over the count,
 ; or two dashes for $FF. In NMI, with VMADDR already on the count's cell.
-; `HudTens` and `HudOnes` in bank 0 are two stores each, and here they are too.
+; `HudTens` and `HudOnes` in bank 0 are `BarPut`'s stores, and here they are
+; too, with the high byte `UpdateStatusBar` left in `!HudAttr`.
 ; ---------------------------------------------------------------------------
 StatusBarLCounter:
         sep #$20
@@ -27636,20 +27975,25 @@ StatusBarLCounter:
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         lda.w !LCounter                 ; $4A1D: the ones
         and.b #$0F
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rtl
 .dashes
         lda.b #!HUD_DASH                ; $4A26
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
+        lda.b #!HUD_DASH
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.w !HudAttr
+        sta !VMDATAL+1
         rtl
 
 ; ---------------------------------------------------------------------------
@@ -27947,7 +28291,8 @@ HudBaseNmi:
         ldx.w #$0000
 -       lda.w !HudBaseBuf,x
         sta !VMDATAL
-        stz !VMDATAL+1
+        lda.b #!HUD_ATTR
+        sta !VMDATAL+1
         inx
         cpx.w #!HUD_CELLS
         bne -
@@ -30718,8 +31063,9 @@ QueenDrawHead:
         lda.b #$06                      ; $703D: six cells
         sta.w !QnRun
 -       lda.w !QueenFrames,x            ; $703F
-        sta !VMDATAL                    ; a window word: the id, and nothing else
-        stz !VMDATAH
+        sta !VMDATAL                    ; a window word: the id, and `!HUD_ATTR`
+        lda.b #!HUD_ATTR
+        sta !VMDATAH
         inx
         dec.w !QnRun
         bne -
@@ -31158,6 +31504,95 @@ UploadSamusBgTwin:
         plp
         rtl
 
+; ---------------------------------------------------------------------------
+; Every colour scheme's CGRAM words, `!SCHEME_WORDS` a scheme, patched in by the
+; builder from `colors.cgramWords`: the one place a colour value lives. $FF
+; until then, so an unpatched image draws white.
+; ---------------------------------------------------------------------------
+SchemeTable:
+        fillbyte $FF : fill !SCHEMES*!SCHEME_WORDS*2
+
+; ---------------------------------------------------------------------------
+; The palettes of the scheme in `!Scheme`: BG3's palette 0, the window's and
+; the two objects', in `SchemeTable`'s order.
+;
+; Entry 0 is written even though the SNES treats a background colour 0 as
+; transparent, because entry 0 is also the backdrop - and on the Game Boy a
+; background pixel of index 0 is opaque and drawn with BGP's first field.
+; Writing the same colour into both is what makes the two agree.
+;
+; In bank 1 since colour schemes Step 3, read long, to make room in bank 0.
+; `Reset` comes in at `LoadDefaultPalette`: WRAM is zero there, and every boot
+; that skips the title plays in the default.
+; ---------------------------------------------------------------------------
+LoadDefaultPalette:
+        sep #$20
+        lda.b #!DEFAULT_SCHEME
+        sta.w !Scheme
+LoadPalette:
+        php
+        rep #$30
+        lda.w !Scheme
+        and.w #$00FF
+        asl
+        asl
+        asl
+        asl
+        asl                             ; !SCHEME_WORDS*2 bytes a scheme
+        tax
+        sep #$20
+        stz !CGADD
+        ldy.w #$0008
+-       lda.l SchemeTable,x
+        sta !CGDATA
+        inx
+        dey
+        bne -
+        ; The window's, BG2 palette `!HUD_PAL`. Entry 0 is BG2's transparent
+        ; colour, written for the same reason the objects' is.
+        lda.b #!HUD_PAL<<4
+        sta !CGADD
+        ldy.w #$0008
+-       lda.l SchemeTable,x
+        sta !CGDATA
+        inx
+        dey
+        bne -
+        ; The object palettes. CGRAM's second half belongs to the sprites: the
+        ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
+        ; go into it and the one after. Entry 0 of each is written and never
+        ; seen - a sprite pixel of colour 0 is transparent - which is the one
+        ; place where the SNES and the Game Boy agree without being made to.
+        ;
+        ; Two palettes rather than one because `drawSamusSprite` sets the OBP1
+        ; bit on every part when Samus is in acid or invulnerable, and a
+        ; palette that was not loaded would make the damage flash black.
+        ;
+        ; **An object palette is sixteen colours**, so the one after is colour
+        ; $90, which is what `PutObject`'s palette 1 reads. Until 1.0 Step 8b's
+        ; playtest OBP1 went to $84, straight after OBP0's four, and palette 1
+        ; was black: a frozen enemy, a stunned one's flash and a blinking drop
+        ; drew black on the black play field. `snes boot` code 15 reads $90.
+        lda.b #$80
+        sta !CGADD
+        ldy.w #$0008
+-       lda.l SchemeTable,x
+        sta !CGDATA
+        inx
+        dey
+        bne -
+.obp1                                   ; the warp rung's `refills` fault patches this
+        lda.b #$90
+        sta !CGADD
+        ldy.w #$0008
+-       lda.l SchemeTable,x
+        sta !CGDATA
+        inx
+        dey
+        bne -
+        plp
+        rtl
+
 ; The window's map to $FF, as `bootRoutine`'s `clearTilemaps` (00:$01FB) and
 ; `gameMode_dead`'s leave the Game Boy's $9C00: the rows the status bar, the
 ; save text and the Queen's head do not write. $FF is `gfx_commonItems`' last
@@ -31172,7 +31607,7 @@ ClearWindowMap:
         lda.w #!BG2_MAP
         sta !VMADDL
         ldx.w #$0400
-        lda.w #$00FF
+        lda.w #(!HUD_ATTR<<8)|$FF
 -       sta !VMDATAL
         dex
         bne -

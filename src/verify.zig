@@ -49,6 +49,11 @@ const audio_level = @import("audio_level.zig");
 // Only a gate built with `vendor/sameboy` present links the renderer; without
 // it the rung says it did not run, and nothing here refers to the import.
 const audio_level_run = if (build_options.have_sameboy) @import("audio_level_run.zig") else struct {};
+const colors = @import("colors.zig");
+const gbc_oracle = @import("gbc_oracle.zig");
+const scheme_grade = @import("scheme_grade.zig");
+// Likewise: only a gate that links SameBoy can boot its CGB model.
+const gbc_oracle_run = if (build_options.have_sameboy) @import("gbc_oracle_run.zig") else struct {};
 
 
 const build_options = @import("build_options");
@@ -57,7 +62,7 @@ const build_options = @import("build_options");
 /// rather than counted: the gate prints a rung per mechanism and some print two
 /// lines, so a count taken from the output would drift against the document
 /// this number exists to send the reader to.
-const rung_count: usize = 49;
+const rung_count: usize = 50;
 
 pub fn main(init: std.process.Init) !void {
     var arena_state = std.heap.ArenaAllocator.init(init.gpa);
@@ -856,6 +861,39 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    // ---- ROM-dependent: are the gbc colours a Game Boy Color's? -----------
+    //
+    // gbc-color-option F4. SameBoy's CGB model boots the plain ROM with its own
+    // boot ROM, and the palettes it leaves are what a Game Boy Color draws the
+    // game in. The `gbc` scheme's tables must be those, and `mono`'s must not.
+    if (rom_bytes) |bytes| blk: {
+        if (comptime !build_options.have_sameboy) {
+            try out.print("      gbc palettes      not run: no SameBoy at vendor/sameboy (tools/sameboy-frames.sh)\n", .{});
+            break :blk;
+        } else {
+            const boot = std.Io.Dir.cwd().readFileAlloc(init.io, gbc_oracle.boot_path, arena, .limited(1 << 12)) catch {
+                try out.print("      gbc palettes      not run: no {s} (tools/sameboy-frames.sh)\n", .{gbc_oracle.boot_path});
+                break :blk;
+            };
+            const p = gbc_oracle_run.run(bytes, boot) catch |e| {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     {s}\n", .{@errorName(e)});
+                break :blk;
+            };
+            if (gbc_oracle.grade(.gbc, p.bg, p.obj)) |m| {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     {s}: SameBoy {any}, scheme {any}\n", .{ m.layer, m.got, m.want });
+            } else if (gbc_oracle.grade(.mono, p.bg, p.obj) == null) {
+                failures += 1;
+                try out.print("FAIL  gbc palettes     fault check: mono's tables passed too\n", .{});
+            } else {
+                try out.print("ok    gbc palettes      SameBoy's CGB boot ROM picks the gbc scheme's BG, OBJ0 and OBJ1 tables; mono's fail\n", .{});
+            }
+        }
+    } else {
+        try out.print("      gbc palettes      not run: no ROM configured (set M2_ROM; see docs/setup.md)\n", .{});
+    }
+
     // ---- ROM-dependent: does the whole thing build, the same way twice? ----
     //
     // The end of the pipeline. Two independent runs from the same input ROM
@@ -1152,7 +1190,9 @@ pub fn main(init: std.process.Init) !void {
                 });
                 try out.print("      the sequence      the countdown falls one a frame, she is drawn on three frames in four,\n", .{});
                 try out.print("                        control waits for a button after it is spent, and then she walks\n", .{});
-                try out.print("      no lever          nothing is written to the cart at any point; the input is Start and a direction\n", .{});
+                try out.print("      no lever          nothing is written to the cart until she walks; the input is Start and a direction\n", .{});
+                try out.print("      the HUD's palette CGRAM $11-$13 made green shows on the status bar's lines alone, and\n", .{});
+                try out.print("                        $01-$03 off them alone: the HUD reads its own slot\n", .{});
 
                 // And the rung is not vacuous. The cheapest fault that reaches
                 // the whole mechanism is in the record rather than in the
@@ -1173,6 +1213,25 @@ pub fn main(init: std.process.Init) !void {
                         try out.print("FAIL  cold boot        a cart whose countdown starts spent still passed: the rung grades nothing\n", .{});
                     },
                     else => try out.print("      fault sweep       a record with the countdown at zero fails it\n", .{}),
+                }
+                // Colour schemes Step 3: the bar's own cells written on the
+                // play field's palette (`lda #$00` for `!HUD_ATTR`), as every
+                // window word was before the step. The play field's green
+                // then reaches the status bar's lines, which is code 159.
+                const attr_at = (snes_inject.symbolOffset("UpdateStatusBar_hudAttr") orelse return error.MissingSymbol) + 1;
+                const hud_fault = try arena.dupe(u8, rom.bytes);
+                hud_fault[attr_at] = 0x00;
+                switch (try coldBootTest(init.io, hud_fault, lua.written())) {
+                    .sequence => |why| if (std.mem.indexOf(u8, why, "($01-$03)") != null) {
+                        try out.print("      fault sweep       the bar's digits on the play field's palette fail the HUD's\n", .{});
+                    } else {
+                        failures += 1;
+                        try out.print("FAIL  cold boot        the bar's digits on palette 0 failed elsewhere: {s}\n", .{why});
+                    },
+                    else => {
+                        failures += 1;
+                        try out.print("FAIL  cold boot        the bar's digits on palette 0 did not fail the HUD's palette check\n", .{});
+                    },
                 }
             },
             .no_emulator => {
@@ -1316,6 +1375,92 @@ pub fn main(init: std.process.Init) !void {
         }
     } else {
         try out.print("skip  title             needs the ROM\n", .{});
+    }
+
+    // ---- With a ROM and an emulator: does each slot keep its scheme? -------
+    //
+    // Colour schemes Step 6. The shipped cart's title with each slot's scheme
+    // in SRAM, driven with L, Right, Left, the clear, the reset button and
+    // Start (`scheme_grade.zig`): CGRAM holds the scheme each step should
+    // show, SRAM keeps what each step should keep, and every CGRAM write lands
+    // in forced blank or vblank. Then each new routine taken out is caught by
+    // the run and the code that grade it.
+    if (rom_bytes) |bytes| {
+        var set = try snes_convert.run(arena, bytes);
+        defer set.deinit();
+        const boot = try snes_screen.newGameBoot(arena, bytes);
+        var diag: snes_inject.Diagnosis = .{};
+        var rom = try snes_inject.build(arena, set, boot, &diag);
+        defer rom.deinit();
+
+        const runs = comptime std.enums.values(scheme_grade.Run);
+        var jobs: [runs.len + scheme_faults.len]ScenarioJob = undefined;
+        for (runs, 0..) |r, i| {
+            var lua: std.Io.Writer.Allocating = .init(arena);
+            try scheme_grade.writeLua(bytes, r, &lua.writer);
+            jobs[i] = .{ .name = @tagName(r), .rom = rom.bytes, .lua = lua.written() };
+        }
+        var placed = true;
+        for (scheme_faults, 0..) |f, i| {
+            const at = snes_inject.symbolOffset(f.label) orelse {
+                placed = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} is not in the engine image\n", .{f.label});
+                jobs[runs.len + i] = .{ .name = f.label, .rom = rom.bytes, .lua = "" };
+                continue;
+            };
+            var jml: [4]u8 = undefined;
+            const patch = if (f.patch.len > 0) f.patch else blk: {
+                // `jml LoadPalette`: the recolour straight away, not in vblank.
+                const lp = snes_inject.symbol("LoadPalette") orelse return error.MissingSymbol;
+                jml = .{ 0x5C, @truncate(lp), @truncate(lp >> 8), @truncate(lp >> 16) };
+                break :blk &jml;
+            };
+            if (std.mem.eql(u8, rom.bytes[at..][0..patch.len], patch)) {
+                placed = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} already holds the patch: the cart is not faulted\n", .{f.label});
+            }
+            const fb = try arena.dupe(u8, rom.bytes);
+            @memcpy(fb[at..][0..patch.len], patch);
+            jobs[runs.len + i] = .{ .name = f.label, .rom = fb, .lua = jobs[@intFromEnum(f.run)].lua };
+        }
+        var got: [jobs.len]?ScenarioGot = @splat(null);
+        try scenarioRuns(arena, init.io, &jobs, &got);
+        if (got[0] == null) {
+            try out.print("ok    schemes           not run: no emulator (set MESEN, see docs/setup.md)\n", .{});
+        } else {
+            var all = placed;
+            for (runs, got[0..runs.len]) |r, g| {
+                if (g.?.code == 0) continue;
+                all = false;
+                failures += 1;
+                try out.print("FAIL  schemes           {s}: exit {d} ({s})\n", .{ @tagName(r), g.?.code, scheme_grade.code(g.?.code) });
+                if (g.?.line.len > 0) try out.print("      {s}\n", .{g.?.line});
+            }
+            for (scheme_faults, got[runs.len..]) |f, g| {
+                const c = if (g) |x| x.code else continue;
+                if (c == f.want) continue;
+                all = false;
+                failures += 1;
+                try out.print("FAIL  schemes fault     {s} taken out on {s}: exit {d} ({s}), wanted {d}\n", .{ f.label, @tagName(f.run), c, scheme_grade.code(c), f.want });
+                if (g.?.line.len > 0) try out.print("      {s}\n", .{g.?.line});
+            }
+            if (all) {
+                try out.print("ok    schemes           each slot's colour scheme on the title, over {d} runs\n", .{runs.len});
+                try out.print("      L                 recolours the title to the next scheme and back, at once\n", .{});
+                try out.print("      the slots         each shows its own scheme; an empty slot's byte is not read\n", .{});
+                try out.print("      kept              L on a game keeps it in SRAM at once, through the reset button and a power-on\n", .{});
+                try out.print("      empty slot        L's choice gone on moving away; Start plays in it and keeps it\n", .{});
+                try out.print("      the clear         the emptied slot shows the default\n", .{});
+                try out.print("      bad bytes         a bad magic, $FF and an id past the cart's schemes play in the default\n", .{});
+                try out.print("      vblank            every CGRAM write in forced blank or vblank\n", .{});
+                try out.print("      L badge           the scheme's name in the bottom border, the rest of it empty, gone in play\n", .{});
+                try out.print("      fault sweep       {d}/{d} engine faults caught by their runs and codes\n", .{ scheme_faults.len, scheme_faults.len });
+            }
+        }
+    } else {
+        try out.print("skip  schemes           needs the ROM\n", .{});
     }
 
     // ---- With a ROM and an emulator: is the pause the Game Boy's? -----------
@@ -2972,6 +3117,9 @@ fn coldBootTest(io: std.Io, rom: []const u8, lua: []const u8) !ColdTest {
         155 => .{ .sequence = "Samus drew over the ship where its colour is not 0: the start cell's transition word has bit 11, and the Game Boy puts her behind it" },
         156 => .{ .sequence = "Samus's parts covered none of the ship's pixels, or none of hers showed: the behind check graded nothing" },
         157 => .{ .sequence = "no drawn frame followed a blank one in the appearance sequence: the behind check never ran" },
+        158 => .{ .sequence = "the HUD's colours ($11-$13) made green showed nowhere, or off the status bar's lines: the HUD is not on its own palette" },
+        159 => .{ .sequence = "the play field's colours ($01-$03) made green showed nowhere, or on the status bar's lines: the two share a palette" },
+        colors.lua_off_scheme => .{ .failed = colors.off_scheme_why },
         255 => .{ .failed = "the emulator timed out: the script never reached a verdict" },
         else => .{ .failed = "the cold-boot script exited with an unallocated code" },
     };
@@ -3188,6 +3336,37 @@ fn scenarioRuns(arena: std.mem.Allocator, io: std.Io, jobs: []const ScenarioJob,
 
 /// The scenario rung's faults: a byte of the menu changed, caught by the check
 /// of the edit that uses it.
+/// The `schemes` rung's faults, colour schemes Step 6: each new routine taken
+/// out of the image the clean runs pass, on the run that grades it. An empty
+/// patch is `jml LoadPalette`, placed by the rung.
+const SchemeFault = struct { label: []const u8, patch: []const u8, run: scheme_grade.Run, want: u8 };
+const scheme_faults = [_]SchemeFault{
+    // No seed (`rtl`): the title opens on the default where slot 0 keeps `mono`.
+    .{ .label = "TitleSchemeSeed", .patch = &.{0x6B}, .run = .slot_move, .want = 10 },
+    // No step: L does nothing.
+    .{ .label = "TitleSchemeStep", .patch = &.{0x6B}, .run = .l_press, .want = 10 },
+    // L on a game shows the scheme and keeps nothing (`nop`s over the `jsl`).
+    .{ .label = "TitleSchemeStep_keep", .patch = &.{ 0xEA, 0xEA, 0xEA, 0xEA }, .run = .keep, .want = 11 },
+    // The id's bound gone (`bcc` to `bra`): `$FF` indexes past the table.
+    .{ .label = "SlotScheme_bound", .patch = &.{0x80}, .run = .bad_id, .want = 10 },
+    // A bad magic taken as good (`sec`).
+    .{ .label = "SchemeMagicOk_bad", .patch = &.{0x38}, .run = .bad_magic, .want = 10 },
+    // The recolour straight away rather than in vblank.
+    .{ .label = "SchemeLater", .patch = &.{}, .run = .l_press, .want = 12 },
+    // The clear leaves the slot's scheme up.
+    .{ .label = "TitleSchemeClear", .patch = &.{0x6B}, .run = .cleared, .want = 10 },
+    // Start keeps nothing, so an empty slot's first game has no scheme.
+    .{ .label = "SchemeStore", .patch = &.{0x6B}, .run = .empty_slot, .want = 11 },
+    // NMI never loads what the title asked for.
+    .{ .label = "SchemeNmi", .patch = &.{0x6B}, .run = .l_press, .want = 10 },
+    // Step 7: NMI recolours and leaves the badge's name as it was (`rtl` over
+    // the `jmp BadgeShow`).
+    .{ .label = "SchemeNmi_badge", .patch = &.{0x6B}, .run = .l_press, .want = 13 },
+    // The badge left in BG1's map and BG1 on the bottom border (`rtl`), so
+    // play shows it.
+    .{ .label = "ClearTitleArt", .patch = &.{0x6B}, .run = .power_on, .want = 13 },
+};
+
 const ScenarioFault = struct { label: []const u8, offset: usize = 0, patch: []const u8, scenario: []const u8, want: u8 };
 const scenario_faults = [_]ScenarioFault{
     // Hi-jump's row (the second, four bytes a row) given the screw attack's
@@ -3245,6 +3424,9 @@ const warp_faults = [_]ScenarioFault{
     // (`ply` for `plx`), as before the step: the kill's pass runs on misaligned
     // slots and writes $FF over the explosion's counter.
     .{ .label = "EarthquakeCheck_out", .patch = &.{0x7A}, .scenario = "missile_kill", .want = 50 },
+    // Colour schemes Step 6: L on the title does nothing (`rtl`), so play
+    // opens in the default rather than the `mono` the scenario picked.
+    .{ .label = "TitleSchemeStep", .patch = &.{0x6B}, .scenario = "scheme", .want = 51 },
 };
 
 /// The pause rung's fault run, 1.0 Step 2a: each new routine, or the piece of
@@ -3348,6 +3530,7 @@ fn pauseCode(code: u8) []const u8 {
 fn titleCode(code: u8) []const u8 {
     return switch (code) {
         0 => "the title did what the Game Boy's did",
+        colors.lua_off_scheme => colors.off_scheme_why,
         90 => "Fatal ran",
         91 => "the title never came up",
         92 => "the title did not open as the Game Boy's: the option hidden, clear unselected, and the slot saveLastSlot names",
@@ -3527,7 +3710,7 @@ fn bootVerdict(exit: u8) BootTest {
         12 => .{ .stalled = "no character data reached VRAM" },
         13 => .{ .stalled = "the tilemap was never uploaded" },
         14 => .{ .stalled = "the boot record's cell was not seeded into the engine's state" },
-        15 => .{ .stalled = "CGRAM does not hold the palette the builder patched in" },
+        15 => .{ .stalled = "CGRAM does not hold the default colour scheme's 16 words" },
         16 => .{ .stalled = "the frame counter's phase is wrong: NMI ran a different number of times between the boot record's seed and MainLoop's first frame" },
         17 => .{ .stalled = "the play window straddled two screens where a picture was compared" },
         18 => .{ .camera = "never reached the guide offset it holds Samus at while she walks, or drifted off it" },
@@ -3683,6 +3866,7 @@ fn bootVerdict(exit: u8) BootTest {
         224 => .{ .metroid = "gate did not choose the table a Game Boy would at that count: `IF_MET_LESS` is taken at or below its operand (00:$254A)" },
         184 => .{ .enemy_death = "rests its 50% roll on a counter that does not alternate: `!EnFrame` took the same parity on every frame the enemy pass acted, which is the collapse `!FrameCount` was rejected for" },
         158 => .{ .block = "reformed with Samus vulnerable and `!BlkCrush` does not say so: 01:$5739's branch is recorded rather than followed, and a recording nothing reaches is dead code" },
+        colors.lua_off_scheme => .{ .failed = colors.off_scheme_why },
         else => |code| if (code >= 20 and code <= 60)
             .{ .differs = (code - 20) * 8 }
         else if (code >= 80 and code <= 120)

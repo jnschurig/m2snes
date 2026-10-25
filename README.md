@@ -74,6 +74,13 @@ against your version's notes. `m2snes --version` prints which version you have.
 (L+R+Start in play) warps, gives items and sets up scenes. It is for testing, not for a
 normal playthrough. Its SHA-1 is the release notes' **debug** line.
 
+### Colour
+
+The cart starts in the Game Boy Color's colours for Metroid II. On the title screen,
+**L** switches the selected file between `GBC` and `MONO` (the original greys). The
+badge in the bottom border shows which one is on. Each file keeps its own scheme: on a
+saved file the choice is stored at once, and a new game stores the scheme it started in.
+
 ### When it refuses
 
 `m2snes` refuses any input that is not the expected ROM. It writes nothing and exits

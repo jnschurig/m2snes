@@ -48,6 +48,7 @@ const render = @import("snes_render.zig");
 const screens = @import("screens.zig");
 const offsets_table = @import("offsets.zig");
 const gfx_info = @import("gfx_info.zig");
+const colors = @import("colors.zig");
 
 /// The assembled engine, committed. Both are imported rather than read from
 /// disk so the shipped builder is a single file with no data directory.
@@ -72,10 +73,9 @@ pub const directory_entry_bytes: usize = layout.directory_entry_bytes;
 // selects nothing itself.
 
 pub const boot_magic = "M2BT";
-pub const boot_version: u8 = 17;
-/// magic, version, map index, cell, tile table, door index, four background
-/// palette words, Samus's character-sheet id, eight object palette words, her
-/// start position as a world coordinate on each axis, her starting pose, the
+pub const boot_version: u8 = 18;
+/// magic, version, map index, cell, tile table, door index, Samus's
+/// character-sheet id, her start position as a world coordinate on each axis, her starting pose, the
 /// camera's start on each axis, the frame counter's seed, and which way she is
 /// facing, the pad she was booted mid-press of, how long the pose she boots in
 /// waits, where all of it came from, and the assets its title screen is made
@@ -83,75 +83,75 @@ pub const boot_version: u8 = 17;
 /// drawn, and what she is carrying, and what she has equipped, and the song,
 /// and the room's own song, and the damage acid and spikes do, and the title's
 /// first sheet as objects, and the new game's save record.
-/// Version 17 appended `initialSaveFile`; version 16 appended the title's object sheet; version 15 appended the two damage values; version 14 appended the room song; version 13 appended the song; version 12 appended the items, beam and weapon; version 11 appended the loadout; version 10
+/// Version 18 dropped the four background and eight object palette words,
+/// which `SchemeTable` replaced (colour schemes Step 5), and every field after
+/// them moved down; version 17 appended `initialSaveFile`; version 16 appended the title's object sheet; version 15 appended the two damage values; version 14 appended the room song; version 13 appended the song; version 12 appended the items, beam and weapon; version 11 appended the loadout; version 10
 /// appended that count; version 9 appended the title screen;
 /// version 8 appended the countdown
 /// and the mode; version 7 appended the pad; version 6 appended the facing;
 /// version 5 appended the counter; version 4 appended the camera; version 3
 /// appended the position and pose; version 2 appended the sheet id and the
 /// object palettes; version 1 ended at the background palette.
-pub const boot_record_bytes: usize = 78 + screen.save_record_len;
+pub const boot_record_bytes: usize = 54 + screen.save_record_len;
 /// Where Samus's `chr_obj` asset id sits within the record.
-pub const boot_samus_chr_at: usize = 18;
-/// And where the two object palettes begin.
-pub const boot_obj_palette_at: usize = 19;
+pub const boot_samus_chr_at: usize = 10;
 /// Samus's start, as `(screen << 8) | pixel` on each axis -- the same shape the
 /// Game Boy's position pairs use, so `room.Placement.worldX` and this field are
 /// directly comparable. Y first, matching the engine's declaration order.
-pub const boot_samus_y_at: usize = 35;
-pub const boot_samus_x_at: usize = 37;
+pub const boot_samus_y_at: usize = 11;
+pub const boot_samus_x_at: usize = 13;
 /// The pose she starts in.
-pub const boot_pose_at: usize = 39;
+pub const boot_pose_at: usize = 15;
 /// Where the camera starts, same shape as the position and read separately from
 /// it. Y first, matching the engine. See `snes_screen.Boot.cam_x` for why it is
 /// not derived from her position any more.
-pub const boot_cam_y_at: usize = 40;
-pub const boot_cam_x_at: usize = 42;
+pub const boot_cam_y_at: usize = 16;
+pub const boot_cam_x_at: usize = 18;
 /// What `InitState` seeds `!FrameCount` with. Physics, not bookkeeping: the
 /// walk's 1/2 alternation is `!FrameCount & 1`, the same expression the
 /// original evaluates on $FF97 at 00:$1C25.
-pub const boot_frame_count_at: usize = 44;
+pub const boot_frame_count_at: usize = 20;
 /// Which way she is facing: $01 right, $00 left, the original's own convention.
 /// Physics, not decoration -- the standing and running handlers branch on it
 /// before they move her, so a cart that boots facing the wrong way loses a
 /// frame turning and never gets it back.
-pub const boot_facing_at: usize = 48;
+pub const boot_facing_at: usize = 24;
 /// The pad word `InitState` seeds `!PadHeld` with, in the engine's `!PAD_*`
 /// bits. See `engine/main.asm`'s `BootInput`.
-pub const boot_input_at: usize = 46;
+pub const boot_input_at: usize = 22;
 /// What `InitState` seeds `!Countdown` with: how many frames the pose she boots
 /// in waits before it hands over control. Zero for every pose but $13.
-pub const boot_countdown_at: usize = 49;
+pub const boot_countdown_at: usize = 25;
 /// Whether the record is the game's own new game or a handover measured
 /// mid-run. The engine does not branch on it -- it reads the record the same
 /// way either way -- but a cart carries the answer so a person holding one can
 /// tell which they have, and so the gate can refuse to grade the wrong kind.
-pub const boot_mode_at: usize = 51;
+pub const boot_mode_at: usize = 27;
 /// The four `chr_bg` assets the title screen's characters come from, in the
 /// order the Game Boy's one 4 KiB copy walks them, and the `tilemap` asset the
 /// screen itself is. Five ids; `$FF` ends the character list early.
-pub const boot_title_chr_at: usize = 52;
+pub const boot_title_chr_at: usize = 28;
 pub const boot_title_chr_count: usize = 4;
-pub const boot_title_map_at: usize = 56;
+pub const boot_title_map_at: usize = 32;
 /// Version 10. How many of `BootWorld`'s entries `SeedWorld` applies.
-pub const boot_world_count_at: usize = 57;
+pub const boot_world_count_at: usize = 33;
 /// Version 11. What she is carrying: energy tanks, health, the missile ceiling
 /// and count, and the two Metroid counts, as `snes_screen.Loadout` holds them.
-pub const boot_tanks_at: usize = 59;
-pub const boot_health_at: usize = 60;
-pub const boot_max_missiles_at: usize = 62;
-pub const boot_missiles_at: usize = 64;
-pub const boot_metroid_real_at: usize = 66;
-pub const boot_metroid_displayed_at: usize = 67;
+pub const boot_tanks_at: usize = 35;
+pub const boot_health_at: usize = 36;
+pub const boot_max_missiles_at: usize = 38;
+pub const boot_missiles_at: usize = 40;
+pub const boot_metroid_real_at: usize = 42;
+pub const boot_metroid_displayed_at: usize = 43;
 /// And the two cannon sheets `toggleMissiles` swaps in, beam then missile.
-pub const boot_cannon_chr_at: usize = 68;
+pub const boot_cannon_chr_at: usize = 44;
 pub const cannon_sheets = [_][]const u8{ "gfx_cannonBeam", "gfx_cannonMissile" };
 /// Version 12. The equipment bits, the parked beam and the selected weapon.
-pub const boot_items_at: usize = 70;
-pub const boot_beam_at: usize = 71;
-pub const boot_weapon_at: usize = 72;
+pub const boot_items_at: usize = 46;
+pub const boot_beam_at: usize = 47;
+pub const boot_weapon_at: usize = 48;
 /// Version 13. The song a handover's Game Boy was playing, 0 for none.
-pub const boot_song_at: usize = 73;
+pub const boot_song_at: usize = 49;
 /// Version 14. `currentRoomSong` ($D092): the song the room asks for whenever
 /// what is playing is not it, and the song a Metroid's death restores by adding
 /// $11 to it. A save-file value, so a new game's comes from `initialSaveFile`
@@ -160,19 +160,19 @@ pub const boot_song_at: usize = 73;
 /// for. Booting it as $FF -- "no door script has run" -- is what left a new
 /// game silent and made the restore ask for $FF + $11 = $10, an id whose table
 /// entry is code (`docs/bug_tracker.md`, 2026-09-22).
-pub const boot_room_song_at: usize = 74;
+pub const boot_room_song_at: usize = 50;
 /// Version 15. `acidDamageValue` and `spikeDamageValue` ($D077/$D078), what a
 /// door's `DAMAGE` sets and a save carries. No version carried them before
 /// Step 22, so a new game's acid took nothing off.
-pub const boot_acid_at: usize = 75;
-pub const boot_spike_at: usize = 76;
+pub const boot_acid_at: usize = 51;
+pub const boot_spike_at: usize = 52;
 /// Version 16 (Step 24h). The `chr_obj` twin of `title_sheets[0]`, which the
 /// title's copy to $8800 also puts under the Game Boy's objects.
-pub const boot_title_obj_at: usize = 77;
+pub const boot_title_obj_at: usize = 53;
 /// Version 17 (1.0 Step 18b). `initialSaveFile`, the record a new game loads
 /// its tables, solidity and graphics from, as the Game Boy's does. Left $FF for
 /// a handover, which replays its door script instead.
-pub const boot_save_at: usize = 78;
+pub const boot_save_at: usize = 54;
 pub const boot_save_len: usize = screen.save_record_len;
 
 /// One tile the record forces into `!TilemapBuf` after the room is drawn.
@@ -536,6 +536,7 @@ pub fn build(gpa: std.mem.Allocator, set: convert.Set, boot: screen.Boot, diag: 
     writeDirectory(&rom);
     try patchTable(&rom, diag);
     try patchBoot(&rom, set, boot, diag);
+    try patchSchemes(&rom, diag);
     patchHeader(&rom);
     return rom;
 }
@@ -588,6 +589,34 @@ fn patchTable(rom: *Rom, diag: *Diagnosis) Error!void {
     }
 }
 
+/// Every colour scheme's CGRAM words into `SchemeTable`, in id order, from
+/// `colors.cgramWords`: the colours live in `colors.zig` and nowhere in the
+/// engine. The table's size is the engine's `!SCHEMES`, checked against
+/// `colors.count` so a scheme added on one side only fails the build.
+fn patchSchemes(rom: *Rom, diag: *Diagnosis) Error!void {
+    const at = symbolOffset("SchemeTable") orelse {
+        diag.fail(null, "the engine image has no SchemeTable symbol", .{});
+        return Error.PatchTableMissing;
+    };
+    const n = symbol("ConstSchemes") orelse 0;
+    const words_each = symbol("ConstSchemeWords") orelse 0;
+    if (n != colors.count or words_each != scheme_words) {
+        diag.fail(null, "SchemeTable holds {d} schemes of {d} words; colors.zig has {d} of {d}", .{
+            n, words_each, colors.count, scheme_words,
+        });
+        return Error.PatchTableMismatch;
+    }
+    for (0..colors.count) |id| {
+        const words = colors.cgramWords(@enumFromInt(id));
+        for (words, 0..) |w, i| {
+            std.mem.writeInt(u16, rom.bytes[at + (id * scheme_words + i) * 2 ..][0..2], w, .little);
+        }
+    }
+}
+
+/// The CGRAM words one scheme loads, mirrored from the engine's `!SCHEME_WORDS`.
+pub const scheme_words: usize = @typeInfo(@TypeOf(colors.cgramWords(.mono))).array.len;
+
 fn writeAddr(dst: *[3]u8, a: u32) void {
     dst[0] = @intCast(a & 0xFF);
     dst[1] = @intCast((a >> 8) & 0xFF);
@@ -624,9 +653,6 @@ fn patchBoot(rom: *Rom, set: convert.Set, boot: screen.Boot, diag: *Diagnosis) E
     rom.bytes[at + 6] = boot.cell;
     rom.bytes[at + 7] = boot.tiletable;
     std.mem.writeInt(u16, rom.bytes[at + 8 ..][0..2], boot.door_index, .little);
-    for (boot.palette, 0..) |colour, i| {
-        std.mem.writeInt(u16, rom.bytes[at + 10 + i * 2 ..][0..2], colour, .little);
-    }
 
     // Samus's sheet is named here rather than in `chooseBoot`, because the id
     // is the converter's: `chooseBoot` picks a screen out of the ROM before
@@ -640,9 +666,6 @@ fn patchBoot(rom: *Rom, set: convert.Set, boot: screen.Boot, diag: *Diagnosis) E
         return Error.SamusSheetMissing;
     };
     rom.bytes[at + boot_samus_chr_at] = sheet.id;
-    for (boot.obj_palette, 0..) |colour, i| {
-        std.mem.writeInt(u16, rom.bytes[at + boot_obj_palette_at + i * 2 ..][0..2], colour, .little);
-    }
 
     // Version 3. The engine used to compute the middle of the boot cell for
     // itself; `chooseBoot` computes it now, so this is a copy rather than a
@@ -1126,8 +1149,6 @@ const testBoot: screen.Boot = .{
     .cell = 0,
     .door_index = 0,
     .tiletable = 0,
-    .palette = .{ 0, 0, 0, 0 },
-    .obj_palette = @splat(0),
     .samus_x = screen.samusStart(0).x,
     .samus_y = screen.samusStart(0).y,
     .cam_x = screen.samusStart(0).x,
@@ -1343,6 +1364,88 @@ fn findBlob(rom: Rom, class: layout.Class, id: u8) ?[]const u8 {
     return null;
 }
 
+test "every boot record offset is the engine's own label's" {
+    // Version 18 took 24 bytes out of the middle of the record, and every
+    // offset after them moved by hand. Each is checked against its label, so
+    // one that moved wrong boots nothing instead of the camera in the pose.
+    const at = symbolOffset("BootRecord").?;
+    const Field = struct { label: []const u8, at: usize };
+    const fields = [_]Field{
+        .{ .label = "BootSamusChr", .at = boot_samus_chr_at },
+        .{ .label = "BootSamusY", .at = boot_samus_y_at },
+        .{ .label = "BootSamusX", .at = boot_samus_x_at },
+        .{ .label = "BootPose", .at = boot_pose_at },
+        .{ .label = "BootCamY", .at = boot_cam_y_at },
+        .{ .label = "BootCamX", .at = boot_cam_x_at },
+        .{ .label = "BootFrameCount", .at = boot_frame_count_at },
+        .{ .label = "BootInput", .at = boot_input_at },
+        .{ .label = "BootFacing", .at = boot_facing_at },
+        .{ .label = "BootCountdown", .at = boot_countdown_at },
+        .{ .label = "BootMode", .at = boot_mode_at },
+        .{ .label = "BootTitleChr", .at = boot_title_chr_at },
+        .{ .label = "BootTitleMap", .at = boot_title_map_at },
+        .{ .label = "BootWorldCount", .at = boot_world_count_at },
+        .{ .label = "BootTanks", .at = boot_tanks_at },
+        .{ .label = "BootHealth", .at = boot_health_at },
+        .{ .label = "BootMaxMiss", .at = boot_max_missiles_at },
+        .{ .label = "BootCurMiss", .at = boot_missiles_at },
+        .{ .label = "BootMetReal", .at = boot_metroid_real_at },
+        .{ .label = "BootMetDisp", .at = boot_metroid_displayed_at },
+        .{ .label = "BootCannonChr", .at = boot_cannon_chr_at },
+        .{ .label = "BootItems", .at = boot_items_at },
+        .{ .label = "BootBeam", .at = boot_beam_at },
+        .{ .label = "BootWeapon", .at = boot_weapon_at },
+        .{ .label = "BootSong", .at = boot_song_at },
+        .{ .label = "BootRoomSong", .at = boot_room_song_at },
+        .{ .label = "BootAcid", .at = boot_acid_at },
+        .{ .label = "BootSpike", .at = boot_spike_at },
+        .{ .label = "BootTitleObj", .at = boot_title_obj_at },
+        .{ .label = "BootSave", .at = boot_save_at },
+    };
+    for (fields) |f| {
+        errdefer std.debug.print("{s}\n", .{f.label});
+        try testing.expectEqual(symbolOffset(f.label).? - at, f.at);
+    }
+    try testing.expectEqual(symbolOffset("TileTableBases").? - at, boot_record_bytes);
+    try testing.expectEqual(@as(?u32, null), symbol("BootPalette"));
+    try testing.expectEqual(@as(?u32, null), symbol("BootObjPalette"));
+}
+
+test "the scheme table is colors.zig's, every scheme in id order" {
+    // Colour schemes Step 5. The engine's constants are mirrors, and the
+    // table the builder patches is the only place the cart's colours live.
+    try testing.expectEqual(@as(u32, colors.count), symbol("ConstSchemes").?);
+    try testing.expectEqual(@as(u32, @intFromEnum(colors.default_scheme)), symbol("ConstDefaultScheme").?);
+    try testing.expectEqual(@as(u32, scheme_words), symbol("ConstSchemeWords").?);
+    try testing.expectEqual(@as(usize, 16), scheme_words);
+    // Step 6: where SRAM keeps each slot's scheme, and the magic that says so.
+    try testing.expectEqual(@as(u32, colors.sram_at), symbol("ConstSramScheme").?);
+    try testing.expectEqual(@as(u32, colors.sram_magic.len), symbol("ConstSchemeMagicLen").?);
+    try testing.expectEqualSlices(u8, &colors.sram_magic, image[symbolOffset("SchemeMagic").?..][0..colors.sram_magic.len]);
+
+    const gpa = testing.allocator;
+    const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(bytes);
+    var set = try convert.run(gpa, bytes);
+    defer set.deinit();
+    const boot = try screen.chooseBoot(gpa, bytes);
+    var diag: Diagnosis = .{};
+    var rom = try build(gpa, set, boot, &diag);
+    defer rom.deinit();
+
+    const at = symbolOffset("SchemeTable").?;
+    for (0..colors.count) |id| {
+        for (colors.cgramWords(@enumFromInt(id)), 0..) |w, i| {
+            try testing.expectEqual(w, std.mem.readInt(u16, rom.bytes[at + (id * scheme_words + i) * 2 ..][0..2], .little));
+        }
+    }
+    // The unpatched image is $FF throughout, so a table the builder skipped
+    // draws white rather than passing for a scheme.
+    for (image[at..][0 .. colors.count * scheme_words * 2]) |b| try testing.expectEqual(@as(u8, 0xFF), b);
+    // And `snes boot` code 15 can tell the default from the old greys.
+    try testing.expect(!std.mem.eql(u16, &colors.cgramWords(.mono), &colors.cgramWords(colors.default_scheme)));
+}
+
 test "the boot record names the screen the builder chose" {
     const gpa = testing.allocator;
     const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;
@@ -1362,9 +1465,6 @@ test "the boot record names the screen the builder chose" {
     try testing.expectEqual(boot.cell, rom.bytes[at + 6]);
     try testing.expectEqual(@as(u8, boot.tiletable), rom.bytes[at + 7]);
     try testing.expectEqual(boot.door_index, std.mem.readInt(u16, rom.bytes[at + 8 ..][0..2], .little));
-    for (screen.palette(screens.live_bgp), 0..) |colour, i| {
-        try testing.expectEqual(colour, std.mem.readInt(u16, rom.bytes[at + 10 + i * 2 ..][0..2], .little));
-    }
     // Version 3: her start position and pose, which the engine used to build
     // for itself out of the cell nibbles.
     try testing.expectEqual(boot.samus_y, std.mem.readInt(u16, rom.bytes[at + boot_samus_y_at ..][0..2], .little));
@@ -1673,6 +1773,21 @@ test "the engine's title-art constants are title_super's" {
     try testing.expectEqual(@as(u32, @as(u32, ts.palette) * 16), symbol("ConstTitleArtCgram").?);
     try testing.expectEqual(@as(u32, 2), symbol("ConstTitleArtMap").?);
     try testing.expectEqual(@as(u32, target.bg12_char_base), @as(u32, 0x1000));
+}
+
+test "the engine's L badge constants are title_badge's" {
+    // Colour schemes Step 7. The engine finds the badge's blobs by id after
+    // "Super"'s, uploads its characters and palette where the converter put
+    // them, and writes each scheme's patch by its size; each is a mirror.
+    const tb = @import("title_badge.zig");
+    try testing.expectEqual(@as(u32, 3), symbol("ConstTitleBadgeChr").?);
+    try testing.expectEqual(@as(u32, 4), symbol("ConstTitleBadgePal").?);
+    try testing.expectEqual(@as(u32, 5), symbol("ConstTitleBadgeMap").?);
+    try testing.expectEqual(@as(u32, tb.chr_first), symbol("ConstBadgeChrFirst").?);
+    try testing.expectEqual(@as(u32, @as(u32, tb.palette) * 16), symbol("ConstBadgeCgram").?);
+    try testing.expectEqual(@as(u32, tb.patch.map_offset), symbol("ConstBadgeMapAt").?);
+    try testing.expectEqual(@as(u32, tb.patch.cols), symbol("ConstBadgeCols").?);
+    try testing.expectEqual(@as(u32, tb.patch.rows), symbol("ConstBadgeRows").?);
 }
 
 test "the debug menu's digits are the readout's, in colour 1" {

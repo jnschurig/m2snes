@@ -42,6 +42,8 @@ const death = @import("death.zig");
 const title_oracle = @import("title_oracle.zig");
 const pause_oracle = @import("pause_oracle.zig");
 const title_super = @import("title_super.zig");
+const title_badge = @import("title_badge.zig");
+const colors = @import("colors.zig");
 
 /// One byte of an engine constant or variable address, by symbol name. Step 12e
 /// needs two dozen of them in one table and the inline `@truncate(inject.symbol(
@@ -364,7 +366,7 @@ fn writeGfxDoor(gpa: std.mem.Allocator, w: *std.Io.Writer, di: usize, gb_dest: u
     // `ITEM`; a door without one leaves the row as the door before left it.
     if (name) |n| {
         try w.writeAll(", name = {");
-        for (n) |b| try w.print("{d},", .{b});
+        for (n) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
         try w.writeAll("}");
     }
     try w.writeAll(" },\n");
@@ -411,7 +413,7 @@ fn writeBar(rom: []const u8, w: *std.Io.Writer) !void {
         @as(u16, @truncate(inject.symbol("VarWinY") orelse return error.MissingSymbol)),
         try blocks_mod.loadAt(rom, 0x580D), try blocks_mod.loadAt(rom, 0x582A),
     });
-    for (text) |b| try w.print("{d},", .{b});
+    for (text) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
     try w.print("}}\nHUD.font = {{\n", .{});
     const arm = convert.itemArm(rom) orelse return error.NoItemArm;
     const font = rom[blocks_mod.offsetIn(arm.font_bank, arm.font_src)..][0..arm.font_len];
@@ -574,7 +576,7 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\--  12  no character data reached VRAM
         \\--  13  the tilemap was never uploaded
         \\--  14  the boot record's cell was not seeded into the engine's state
-        \\--  15  the palette in CGRAM is not the one the builder patched in
+        \\--  15  CGRAM does not hold the default colour scheme's 16 words (`colors.cgramWords`)
         \\--  16  the frame counter's phase: NMI ran a different number of times
         \\--      between the boot record's seed and the first frame of MainLoop
         \\--  17  the play window straddled two screens where a picture was compared
@@ -719,7 +721,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\local VIEW_W, VIEW_H, SCREEN_PX = {d}, {d}, {d}
         \\local WIN_LEFT, BAND_TOP = {d}, {d}
         \\local CELL, CELL_AFTER_OPEN = {d}, {d}
-        \\local PALETTE = {{ {d}, {d}, {d}, {d} }}
         \\
     , .{
         screen.ram.frame_count,      screen.ram.cell,
@@ -737,8 +738,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         screens.screen_px,
         screen.win_left,             screen.band_top,
         boot.cell,                   plan.after_open,
-        boot.palette[0],             boot.palette[1],
-        boot.palette[2],             boot.palette[3],
     });
 
     // The bit the *cartridge's* Bomb arm sets, read out of its `SET n,A` rather
@@ -1433,17 +1432,16 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         try w.print("\n}}\n", .{});
     }
     try w.print("\n", .{});
-    // OBP1, as the builder converts it: the palette `PutObject` selects for a
-    // Game Boy object with bit 4 of its attribute set. Its own `print` for the
-    // thirty-two-argument ceiling below. A global and not a `local`: the
-    // script's main chunk is at Lua's 200 locals.
-    try w.print("OBJ_PALETTE1 = {{ {d}, {d}, {d}, {d} }}\n", .{
-        boot.obj_palette[4], boot.obj_palette[5], boot.obj_palette[6], boot.obj_palette[7],
-    });
+    // The 16 CGRAM words the default scheme loads, in `SchemeTable`'s order:
+    // BG palette 0, the window's, OBP0's and OBP1's. The gate zeroes SRAM and
+    // this script boots past the title, so the cart is in the default. A
+    // global and not a `local`: the script's main chunk is at Lua's 200.
+    try w.print("SCHEME_CGRAM = {{", .{});
+    for (colors.cgramWords(colors.default_scheme)) |word| try w.print(" {d},", .{word});
+    try w.print(" }}\n", .{});
 
     try w.print(
         \\-- Drawing Samus.
-        \\local OBJ_PALETTE = {{ {d}, {d}, {d}, {d} }}
         \\local RAM_FACING, RAM_SPRID = {d}, {d}
         \\local RAM_SPRX, RAM_SPRY, RAM_OAMIDX = {d}, {d}, {d}
         \\local OAM_X_OFS, OAM_Y_OFS = {d}, {d}
@@ -1454,8 +1452,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\local MASK_MAX = 16 * 64
         \\
     , .{
-        boot.obj_palette[0],         boot.obj_palette[1],
-        boot.obj_palette[2],         boot.obj_palette[3],
         screen.ram.facing,           screen.ram.sprite_id,
         screen.ram.sprite_x,         screen.ram.sprite_y,
         screen.ram.oam_index,
@@ -1517,6 +1513,7 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
     try writeScreen(w, "SCREEN", here);
     try writeScreen(w, "SCREEN_AFTER", after);
     try writeSprites(w, set);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\-- Mesen hands back a 256x239 overscan frame as a ONE-BASED lua table, so
@@ -1525,12 +1522,6 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\-- were assumed to be 0-based and 8: the picture matched at an offset of one
         \\-- in each axis and looked like an engine bug.
         \\local OVERSCAN = (239 - 224) // 2
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\
         \\local function rd16(a, m) return emu.read(a, m) + 256 * emu.read(a + 1, m) end
         \\
@@ -1674,7 +1665,8 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  if words == 0 then emu.stop(13) end
         \\  -- Step 24g: the window's second row is `saveTextTilemap`, which
         \\  -- `loadTitleScreen` copies there (05:$40A0) and the bar shows at a
-        \\  -- station. Palette 0, no priority, as `HudPut` writes the first row.
+        \\  -- station. Words as `target.windowWord` makes them and `HudPut`
+        \\  -- writes the first row: the HUD's palette, no priority.
         \\  for i = 0, #HUD.boot - 1 do
         \\    if rd16(HUD.map + 64 + i * 2, vram) ~= HUD.boot[i + 1] then emu.stop(3) end
         \\  end
@@ -1691,18 +1683,20 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  -- Version 15: and the damage a room does, or acid takes nothing off.
         \\  if emu.read(MS.acid, wram) ~= MS.wantAcid then emu.stop(197) end
         \\  if emu.read(MS.spike, wram) ~= MS.wantSpike then emu.stop(197) end
-        \\  for i = 0, 3 do
-        \\    if rd16(i * 2, cgram) ~= PALETTE[i + 1] then emu.stop(15) end
-        \\    -- The object half of CGRAM. Colour $80 is the first object
-        \\    -- palette, which is where OBP0 goes; entry 0 of it is never shown
-        \\    -- and is checked anyway, because it is written.
-        \\    if rd16(0x100 + i * 2, cgram) ~= OBJ_PALETTE[i + 1] then emu.stop(15) end
-        \\    -- And OBP1 in object palette 1, which `PutObject` selects for bit 4
-        \\    -- of a Game Boy attribute. An object palette is sixteen colours, so
-        \\    -- palette 1 is colour $90, not the $84 after OBP0's four: the
-        \\    -- frozen enemy, a stunned one's flash and a blinking drop drew
-        \\    -- black until 1.0 Step 8b's playtest (`docs/bug_tracker.md`).
-        \\    if rd16(0x120 + i * 2, cgram) ~= OBJ_PALETTE1[i + 1] then emu.stop(15) end
+        \\  -- The default scheme's 16 words, all of them: BG palette 0, the
+        \\  -- window's (BG2 palette 1, colour $10), and the object half of CGRAM.
+        \\  -- Colour $80 is the first object palette, OBP0's; entry 0 of it is
+        \\  -- never shown and is checked anyway, because it is written. OBP1 is
+        \\  -- object palette 1, which `PutObject` selects for bit 4 of a Game
+        \\  -- Boy attribute. An object palette is sixteen colours, so palette 1
+        \\  -- is colour $90, not the $84 after OBP0's four: the frozen enemy, a
+        \\  -- stunned one's flash and a blinking drop drew black until 1.0 Step
+        \\  -- 8b's playtest (`docs/bug_tracker.md`).
+        \\  for p = 0, 3 do
+        \\    local base = ({{ 0x00, 0x20, 0x100, 0x120 }})[p + 1]
+        \\    for i = 0, 3 do
+        \\      if rd16(base + i * 2, cgram) ~= SCHEME_CGRAM[p * 4 + i + 1] then emu.stop(15) end
+        \\    end
         \\  end
         \\end
         \\
@@ -5084,6 +5078,10 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- 156  her parts covered no pixel of the ship's, or none of hers showed:
         \\--      155 graded nothing
         \\-- 157  no drawn frame followed a blank one in the appearance sequence
+        \\-- 158  the HUD's colours ($11-$13) made green showed nowhere, or not
+        \\--      only on the status bar's lines: the HUD is not on its own palette
+        \\-- 159  the play field's ($01-$03) made green showed nowhere, or on the
+        \\--      status bar's lines: the play field shares the HUD's palette
         \\
         \\local wram  = emu.memType.snesWorkRam
         \\local vram  = emu.memType.snesVideoRam
@@ -5106,6 +5104,9 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- Step 24e: the Game Boy's first play row under the status bar, and
         \\-- where the engine keeps BGP, whose low two bits are colour 0's shade.
         \\BEHIND = {{ rows = {d}, bgp = {d}, blank = nil, at = nil, done = false }}
+        \\-- Colour schemes Step 3: the HUD's BG2 palette, as a CGRAM byte offset,
+        \\-- and the play field's, BG3's palette 0.
+        \\PROBE = {{ hud = {d}, play = 0, saved = nil }}
         \\
     , .{
         screen.ram.frame_count, screen.ram.pose,      screen.ram.unhandled,
@@ -5118,6 +5119,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         screen.win_left,        screen.band_top,
         try iconBytes(rom, 0),  try iconBytes(rom, 1),
         try engineDefine("!HUD_WY         = $"), try engineDefine("!BgPalette    = $"),
+        @as(u16, target.hud_palette) * 16 * 2,
     });
     try writeSramPrelude(w, &.{});
 
@@ -5125,6 +5127,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
     // exist when it is created and these are read inside one.
     try writeBytes(w, "TITLE_CHR", run);
     try writeBytes(w, "TITLE_IDS", ids);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\
@@ -5139,12 +5142,6 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- A quarter was tried first and sits exactly on the real ratio, which
         \\-- makes it a coin toss on the rounding.
         \\local MIN_SHARE = 8
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
-        \\end
         \\
         \\-- Step 24e. The ship's cell has bit 11 of its transition word set, so on
         \\-- the Game Boy every part of hers carries OAM bit 7 there (00:$3ED5,
@@ -5186,6 +5183,42 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\    end
         \\  end
         \\  return parts, over, seen
+        \\end
+        \\
+        \\-- Colour schemes Step 3: which lines a palette reaches. Its three
+        \\-- visible colours are made green, which no palette has, for a frame,
+        \\-- and the green pixels counted on the status bar's lines and off them.
+        \\-- CGRAM only, and put back after the frame.
+        \\function probePoke(base)
+        \\  PROBE.saved = {{}}
+        \\  for i = 1, 3 do
+        \\    PROBE.saved[i] = rd16(base + i * 2, cgram)
+        \\    emu.write(base + i * 2, 0xE0, cgram)
+        \\    emu.write(base + i * 2 + 1, 0x03, cgram)
+        \\  end
+        \\end
+        \\function probeRestore(base)
+        \\  for i = 1, 3 do
+        \\    emu.write(base + i * 2, PROBE.saved[i] & 0xFF, cgram)
+        \\    emu.write(base + i * 2 + 1, PROBE.saved[i] >> 8, cgram)
+        \\  end
+        \\end
+        \\function probeGreen(buf)
+        \\  local bar, rest = 0, 0
+        \\  local top = BAND_TOP + OVERSCAN
+        \\  for y = 0, 238 do
+        \\    for x = 0, 255 do
+        \\      local px = buf[y * 256 + x + 1]
+        \\      if (px >> 16) & 0xFF < 16 and (px >> 8) & 0xFF > 240 and px & 0xFF < 16 then
+        \\        if y >= top + BEHIND.rows and y < top + VIEW_H and x >= WIN_LEFT and x < WIN_LEFT + VIEW_W then
+        \\          bar = bar + 1
+        \\        else
+        \\          rest = rest + 1
+        \\        end
+        \\      end
+        \\    end
+        \\  end
+        \\  return bar, rest
         \\end
         \\
         \\local frames, phase, since, checked = 0, 0, 0, false
@@ -5334,11 +5367,34 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\    return
         \\  end
         \\
-        \\  -- Playing. The direction is still held, so the pose machine has to
-        \\  -- move her -- which is what says the cart reached the game rather
-        \\  -- than a state that merely stopped being pose ${X:0>2}.
-        \\  if rd16(RAM_SAMX, wram) ~= startX then emu.stop(0) end
-        \\  if since > 120 then emu.stop(149) end
+        \\  if phase == 5 then
+        \\    -- Playing. The direction is still held, so the pose machine has to
+        \\    -- move her -- which is what says the cart reached the game rather
+        \\    -- than a state that merely stopped being pose ${X:0>2}.
+        \\    if rd16(RAM_SAMX, wram) ~= startX then
+        \\      hold, phase, since = nil, 6, 0
+        \\      probePoke(PROBE.hud)
+        \\      return
+        \\    end
+        \\    if since > 120 then emu.stop(149) end
+        \\    return
+        \\  end
+        \\
+        \\  -- The frame drawn with the HUD's colours green, then the one with the
+        \\  -- play field's. Each palette reaches its own lines and no others.
+        \\  local bar, rest = probeGreen(emu.getScreenBuffer())
+        \\  if phase == 6 then
+        \\    probeRestore(PROBE.hud)
+        \\    if bar == 0 or rest ~= 0 then
+        \\      emu.stop(158)
+        \\      return
+        \\    end
+        \\    probePoke(PROBE.play)
+        \\    phase = 7
+        \\    return
+        \\  end
+        \\  probeRestore(PROBE.play)
+        \\  if rest == 0 or bar ~= 0 then emu.stop(159) else emu.stop(0) end
         \\end, emu.eventType.endFrame)
         \\
         \\emu.addEventCallback(function()
@@ -6579,7 +6635,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\-- 100  the engine was handed a pose it could not run
         \\-- 101  "Super" is not `super.png` at `super_at` over the Game Boy's title,
         \\--      or its two colours are not the approved ones in CGRAM (Step 24j)
-        \\-- 102  "Super" is still in BG1's map once the game has started
+        \\-- 102  "Super", or the L badge (colour schemes Step 7), is still in
+        \\--      BG1's map once the game has started
         \\-- 103  a frame asked for the select sound another number of times than
         \\--      the Game Boy's (Step 24i): the cart's `!AudRec` against the
         \\--      stores `title_oracle.selectSites` finds, executed
@@ -6636,6 +6693,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\local SUPER_X0, SUPER_Y0, SUPER_W, SUPER_H = {d}, {d}, {d}, {d}
         \\local SUPER_CG, SUPER_RED, SUPER_BLUE = {d}, {d}, {d}
         \\local SUPER_MAP, SUPER_COLS, SUPER_ROWS = {d}, {d}, {d}
+        \\-- Colour schemes Step 7: the L badge's patch in BG1's map.
+        \\local BADGE_MAP, BADGE_COLS, BADGE_ROWS = {d}, {d}, {d}
         \\
         \\
     , .{
@@ -6644,6 +6703,8 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         (@as(u32, title_super.palette) * 16 + 1) * 2, super_red,  super_blue,
         (try sym("ConstReadoutMap") + title_super.patch.map_offset) * 2,
         title_super.patch.cols,     title_super.patch.rows,
+        (try sym("ConstReadoutMap") + title_badge.patch.map_offset) * 2,
+        title_badge.patch.cols,     title_badge.patch.rows,
     });
 
     // Per title frame: the three state bytes and the menu's sprites, as the
@@ -6684,6 +6745,7 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
     try writeBytes(w, "OBJCHR", obj_chr);
     try writeBytes(w, "AFTER", &run.slots_after);
     try writeSramPrelude(w, &seed);
+    try colors.writeLuaShade(w, colors.default_scheme);
 
     try w.print(
         \\
@@ -6710,12 +6772,6 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\  local s = ""
         \\  for _, k in ipairs(keys) do s = s .. k .. "," end
         \\  return s
-        \\end
-        \\
-        \\local function shade(px)
-        \\  local r = (px >> 16) & 0xFF
-        \\  if r > 200 then return 0 elseif r > 120 then return 1
-        \\  elseif r > 40 then return 2 else return 3 end
         \\end
         \\
         \\-- A 15-bit colour as Mesen draws it: each channel c becomes (c << 3) | (c >> 2).
@@ -6813,6 +6869,11 @@ pub fn writeTitle(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot, mo
         \\  for r = 0, SUPER_ROWS - 1 do
         \\    for c = 0, SUPER_COLS * 2 - 1 do
         \\      if emu.read(SUPER_MAP + r * 64 + c, vram) ~= 0 then fail(102, prevT) end
+        \\    end
+        \\  end
+        \\  for r = 0, BADGE_ROWS - 1 do
+        \\    for c = 0, BADGE_COLS * 2 - 1 do
+        \\      if emu.read(BADGE_MAP + r * 64 + c, vram) ~= 0 then fail(102, prevT) end
         \\    end
         \\  end
         \\  emu.stop(0)

@@ -2114,6 +2114,15 @@ test "Samus goes behind by the cartridge's rule, and the engine's play priority 
     try testing.expectEqual(@as(u1, 1), target.play_priority);
 }
 
+test "the engine's window words name the palette the converter's do" {
+    // Colour schemes Step 3: the HUD has a BG2 palette of its own, CGRAM
+    // $10-$13, and the Queen's head (converted) and the bar (the engine's)
+    // must both be on it. Not palette 0: that is the play field's.
+    const got = inject.symbol("ConstHudPal") orelse return error.MissingSymbol;
+    try testing.expectEqual(@as(u32, target.hud_palette), got);
+    try testing.expect(target.hud_palette != target.play_palette);
+}
+
 test "the title's menu is the cartridge's: every constant, the cursor's table and the slot's stride" {
     // Step 24h. Each constant against the instruction it came out of, where the
     // routine names it twice both sites; the cursor table against 05:$42E1's
