@@ -12,12 +12,13 @@ updated:
   - 2026-10-24T04:43:43Z
   - 2026-10-24T19:54:20Z
   - 2026-10-24T22:49:00Z
+  - 2026-10-25T02:29:47Z
 working_directory: /Users/james/git/m2snes
 ---
 
 # Implementation Plan
 
-## Status: Final
+## Status: Complete
 
 ## Overview
 
@@ -321,7 +322,7 @@ tripwire for `full`.
     exits 13 on `l_press`; `ClearTitleArt` → `rtl` exits 13 on `power_on`.
     The crawl didn't move.
 
-- [ ] **Step 8: Docs, playtest, PR**
+- [x] **Step 8: Docs, playtest, PR**
   - [x] `docs/feature_tracker.md`: a colour-schemes entry, graded by the
         rungs above. README playing section: L on the title cycles the
         colour scheme, and each file remembers its own.
@@ -334,5 +335,8 @@ tripwire for `full`.
     - L shows greys and `MONO`;
     - a saved slot keeps its scheme after a power-cycle;
     - acid turns Samus's flash green.
-  - [ ] Commit the docs, push, and open a PR to main, with the attribution
+  - [x] Commit the docs, push, and open a PR to main, with the attribution
         lines.
+  - Done as: PR #7. The tracker entry is a new "After 1.0 (E)" section, E1.
+    `dist/README.txt` got the same note as the README. The full gate and
+    `pin-check` were green; all four FXPak checks passed (James).
