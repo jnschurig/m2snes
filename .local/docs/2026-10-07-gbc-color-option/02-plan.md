@@ -11,6 +11,7 @@ updated:
   - 2026-10-24T03:12:25Z
   - 2026-10-24T04:43:43Z
   - 2026-10-24T19:54:20Z
+  - 2026-10-24T22:49:00Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -321,14 +322,14 @@ tripwire for `full`.
     The crawl didn't move.
 
 - [ ] **Step 8: Docs, playtest, PR**
-  - [ ] `docs/feature_tracker.md`: a colour-schemes entry, graded by the
+  - [x] `docs/feature_tracker.md`: a colour-schemes entry, graded by the
         rungs above. README playing section: L on the title cycles the
         colour scheme, and each file remembers its own.
-  - [ ] THIRD-PARTY-NOTICES: decide on a SameBoy line for the 12 colour
+  - [x] THIRD-PARTY-NOTICES: decide on a SameBoy line for the 12 colour
         values (MIT) and add it if needed.
-  - [ ] `verify-gate` skill run: unit, policy, `verify`, `verify-full`,
+  - [x] `verify-gate` skill run: unit, policy, `verify`, `verify-full`,
         pins.
-  - [ ] FXPak playtest (F6), each check able to fail:
+  - [x] FXPak playtest (F6), each check able to fail:
     - fresh SRAM shows a colour title with the `GBC` badge;
     - L shows greys and `MONO`;
     - a saved slot keeps its scheme after a power-cycle;
