@@ -291,6 +291,14 @@ pub fn build(b: *std.Build) void {
     });
     warp_mod.addOptions("build_options", options);
     warp_mod.addImport("testrom", testrom_mod);
+    // Colorization Step 4: the colour areas, flood-filled over the world.
+    const areas_mod = b.createModule(.{
+        .root_source_file = b.path("src/areas.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    areas_mod.addOptions("build_options", options);
+    areas_mod.addImport("testrom", testrom_mod);
 
     // Step 12f's enemy oracle: an AI graded against the Game Boy running it.
     const enemy_oracle_mod = b.createModule(.{
@@ -826,7 +834,7 @@ pub fn build(b: *std.Build) void {
         run.step.dependOn(&crawl_run.step);
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod }) |mod| {
+    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod, areas_mod }) |mod| {
         // Separate from the list above only because these need the working
         // directory set: both find the retail ROM by relative path.
         addAudio(b, mod);
@@ -955,6 +963,22 @@ pub fn build(b: *std.Build) void {
     frames_run.setCwd(b.path("."));
     b.step("frames", "Render a reference frame for every in-use map screen into extracted/frames/")
         .dependOn(&frames_run.step);
+
+    // ---- Colour areas (colorization Step 4) ---------------------------------
+    const areas_mod_exe = b.createModule(.{
+        .root_source_file = b.path("src/areas_main.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    areas_mod_exe.addOptions("build_options", options);
+    areas_mod_exe.addImport("testrom", testrom_mod);
+    areas_mod_exe.addImport("png", png_mod);
+    const areas_run = b.addRunArtifact(b.addExecutable(.{ .name = "areas", .root_module = areas_mod_exe }));
+    areas_run.setCwd(b.path("."));
+    areas_run.has_side_effects = true;
+    if (b.args) |args| areas_run.addArgs(args);
+    b.step("areas", "Draw each map bank with the colour areas over it into build-out/areas/, and report the fill")
+        .dependOn(&areas_run.step);
 
     // ---- Disassembler ------------------------------------------------------
     const disasm_mod_exe = b.createModule(.{

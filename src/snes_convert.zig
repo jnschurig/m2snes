@@ -46,6 +46,7 @@ const title_badge = @import("title_badge.zig");
 const debug_tables = @import("debug_tables.zig");
 const gfx_info = @import("gfx_info.zig");
 const warp = @import("warp.zig");
+const areas = @import("areas.zig");
 
 pub const Error = error{
     /// A door script names a source address that falls in no offsets entry.
@@ -387,6 +388,11 @@ pub fn convertTilemap(allocator: std.mem.Allocator, gb: []const u8, name: []cons
 /// and no separate flag is needed.
 pub const cell_bytes: usize = 4;
 pub const screens_per_bank: usize = map.screens_per_bank;
+
+/// After a bank's 256 cells, one byte per cell: its colour area for the
+/// `full` scheme (`areas.Area`), at this offset in the bank's `map_cells`
+/// blob. From `areas.tableOf`, so built from the ROM and never committed.
+pub const area_offset: usize = map.cells * cell_bytes;
 
 /// The one cell in bank $A holding a null pointer. It is not the blank screen -
 /// blank is index 0 - so it needs a value of its own rather than being folded
@@ -1266,13 +1272,15 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
     // ---- Map ---------------------------------------------------------------
     var cells: std.ArrayList(Blob) = .empty;
     var screen_blobs: std.ArrayList(Blob) = .empty;
+    const area_table = try areas.tableOf(a, rom);
     for (map.first_bank..map.last_bank + 1) |b| {
         const bank: u8 = @intCast(b);
         var parsed = try map.parseBank(a, rom, bank);
         defer parsed.deinit(a);
+        const converted = try convertBank(a, parsed);
         try cells.append(a, .{
             .name = try std.fmt.allocPrint(a, "map{X}_cells", .{bank}),
-            .bytes = try convertBank(a, parsed),
+            .bytes = try std.mem.concat(a, u8, &.{ converted, &area_table[bank - map.first_bank] }),
         });
         // Screen bodies are metatile indexes and stay exactly that. Every body
         // is carried, referenced or not, for the same reason `map.parseScreens`
@@ -1725,6 +1733,21 @@ test "converting the whole ROM leaves nothing unresolved" {
     try testing.expectEqual(@as(usize, 7), set.map_cells.len);
     try testing.expectEqual(@as(usize, 7), set.map_screens.len);
     try testing.expectEqual(@as(usize, tileset.solidity_bytes), set.solidity.bytes.len);
+
+    // Each bank's cells carry an area per cell after them: every in-use
+    // cell's a real area, and every blank cell's none.
+    for (set.map_cells) |cb| {
+        try testing.expectEqual(area_offset + map.cells, cb.bytes.len);
+        for (0..map.cells) |ci| {
+            const in_use = cb.bytes[ci * cell_bytes] != 0;
+            const a = cb.bytes[area_offset + ci];
+            if (in_use) {
+                try testing.expect(a < areas.Area.count);
+            } else {
+                try testing.expectEqual(areas.none, a);
+            }
+        }
+    }
 
     // Every metatile table converts back to the ROM's own bytes.
     for (set.metatiles) |m| {
