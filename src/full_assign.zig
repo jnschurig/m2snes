@@ -1,9 +1,9 @@
 //! The `full` scheme's palette assignment: which palette slot each tile
 //! and sprite is drawn in (colorization F2).
 //!
-//! **Generated** by `zig build ejrtq` from EJRTQ's GBC colorization of
+//! **Generated** by `zig build full-assign` from EJRTQ's GBC colorization of
 //! Metroid II (v1.3, on romhacking.net), except the hand-edited section
-//! at the end. `zig build ejrtq -- check` diffs this file against a fresh
+//! at the end. `zig build full-assign -- check` diffs this file against a fresh
 //! extraction. `docs/colorization.md` describes the model and names the
 //! hack. (Not by its number here: the leak check would read it as a
 //! colour value.)
@@ -17,7 +17,7 @@ pub const Layer = enum { bg, obj };
 
 /// A graphics region of `offsets.zig`, and one slot digit per 16-byte tile,
 /// in ROM order. Sprites and the background share them. `seen` is what
-/// the recording showed of each tile (`zig build ejrtq -- cover`): `.`
+/// the recording showed of each tile (`zig build full-assign -- cover`): `.`
 /// never, so its slot is unobserved; `b` on the background or window
 /// only; `s` as a sprite only; `+` both. Empty: coverage not run.
 pub const Region = struct { name: []const u8, slots: []const u8, seen: []const u8 = "" };
@@ -373,7 +373,7 @@ pub const queen = [_]Derived{
     .{ .id = 0xFF, .slots = 0b00000001 },
 };
 
-// ---- Hand-edited below this line. `zig build ejrtq` keeps it as it is. ----
+// ---- Hand-edited below this line. `zig build full-assign` keeps it as it is. ----
 
 /// Hand choices for the status bar's original ids (`hud`): one per
 /// conflict the oracle reports, or to replace a derived slot.

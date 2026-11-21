@@ -145,10 +145,10 @@ write (`00:0163` → `0172`). Every effect is a change to the colours instead:
 
 Colour 0 is black in every BG palette of the colour block.
 
-## The extraction (`zig build ejrtq`)
+## The extraction (`zig build full-assign`)
 
-`src/ejrtq.zig` reads the model above off the patched ROM, built in memory,
-and writes `src/full_assign.zig`. `zig build ejrtq -- check` diffs the
+`src/full_ref.zig` reads the model above off the patched ROM, built in memory,
+and writes `src/full_assign.zig`. `zig build full-assign -- check` diffs the
 committed file against a fresh extraction. What it found:
 
 - **Every slot is explained.** 2,971 source tiles in 47 regions. One other
@@ -173,13 +173,13 @@ committed file against a fresh extraction. What it found:
   different colours. So no look-alike class is committed. That pair gets an
   eye check when the colours are chosen.
 
-## Coverage (`zig build ejrtq -- cover`)
+## Coverage (`zig build full-assign -- cover`)
 
 The static read gives every source tile a slot. The coverage pass says which
 of those tiles the game actually shows. It replays James's 100% recording
 (`reference/metroid2-100p-recording/`, 25 `.mmo` parts) on the **original**
 ROM in Mesen, eight parts at a time, through `gb_trace`'s driver and cart-RAM
-channel (`src/ejrtq_cover.zig`).
+channel (`src/full_ref_cover.zig`).
 
 - **Which source tile is in each VRAM tile.** A write callback on tile data
   (`$8000-$97FF`) fires on each tile's first byte. The copy loops read the
@@ -210,10 +210,10 @@ What it found (2026-11-21):
   combined ones do.
 - Samus stood in most of each area's cells, all of areas 4 and 9.
 
-## Validation (`zig build ejrtq -- cgb`)
+## Validation (`zig build full-assign -- cgb`)
 
 The static model against the **patched** ROM running in SameBoy as a Game Boy
-Color (`src/sbcgb.c`, graded by `src/ejrtq_cgb.zig`). SameBoy tracks each VRAM
+Color (`src/sbcgb.c`, graded by `src/full_ref_cgb.zig`). SameBoy tracks each VRAM
 tile's source tile the same way as the coverage pass. At each state the check
 compares:
 - every visible background and window cell's attribute (VRAM bank 1) with

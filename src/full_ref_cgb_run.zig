@@ -1,9 +1,9 @@
 //! Runs `sbcgb.c`: the patched ROM on SameBoy's Game Boy Color. Links
 //! SameBoy, so only a build with `vendor/sameboy` reaches it.
-//! `ejrtq_cgb.zig` grades what it returns.
+//! `full_ref_cgb.zig` grades what it returns.
 
 const std = @import("std");
-const cgb = @import("ejrtq_cgb.zig");
+const cgb = @import("full_ref_cgb.zig");
 
 extern fn sbcgb_run(
     rom: [*]const u8,

@@ -499,7 +499,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // The EJRTQ oracle's extraction (colorization Step 3): IPS apply, and the
+    // The full scheme's slot extraction (colorization Step 3): IPS apply, and the
     // static read of EJRTQ's slots into `src/full_assign.zig`. `gb_trace.zig`
     // (for its zip reader) brings the emulator's imports with it.
     const ips_mod = b.createModule(.{
@@ -507,29 +507,29 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const ejrtq_mod = b.createModule(.{
-        .root_source_file = b.path("src/ejrtq.zig"),
+    const full_ref_mod = b.createModule(.{
+        .root_source_file = b.path("src/full_ref.zig"),
         .target = target,
         .optimize = optimize,
     });
-    ejrtq_mod.addOptions("build_options", options);
-    ejrtq_mod.addImport("testrom", testrom_mod);
-    ejrtq_mod.addImport("png", png_mod);
-    // The CGB check's grader (Step 5), ROM-free; `ejrtq_cgb_run.zig` links
+    full_ref_mod.addOptions("build_options", options);
+    full_ref_mod.addImport("testrom", testrom_mod);
+    full_ref_mod.addImport("png", png_mod);
+    // The CGB check's grader (Step 5), ROM-free; `full_ref_cgb_run.zig` links
     // SameBoy for the tool only.
-    const ejrtq_cgb_mod = b.createModule(.{
-        .root_source_file = b.path("src/ejrtq_cgb.zig"),
+    const full_ref_cgb_mod = b.createModule(.{
+        .root_source_file = b.path("src/full_ref_cgb.zig"),
         .target = target,
         .optimize = optimize,
     });
     // Its coverage pass (Step 5): the recording through Mesen.
-    const ejrtq_cover_mod = b.createModule(.{
-        .root_source_file = b.path("src/ejrtq_cover.zig"),
+    const full_ref_cover_mod = b.createModule(.{
+        .root_source_file = b.path("src/full_ref_cover.zig"),
         .target = target,
         .optimize = optimize,
     });
-    ejrtq_cover_mod.addOptions("build_options", options);
-    ejrtq_cover_mod.addImport("testrom", testrom_mod);
+    full_ref_cover_mod.addOptions("build_options", options);
+    full_ref_cover_mod.addImport("testrom", testrom_mod);
 
     // The bytes that go at those addresses: the image the cart uploads at boot,
     // and the one `spcrun` runs offline when `audiocmp` grades the engine.
@@ -843,13 +843,13 @@ pub fn build(b: *std.Build) void {
         run.has_side_effects = true;
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod, ips_mod, ejrtq_mod, ejrtq_cgb_mod }) |mod| {
+    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod, ips_mod, full_ref_mod, full_ref_cgb_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const run = b.addRunArtifact(t);
         run.step.dependOn(&crawl_run.step);
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod, areas_mod, ejrtq_cover_mod }) |mod| {
+    for ([_]*std.Build.Module{ audiocost_mod, audio_shim_mod, audio_data_mod, aram_layout_mod, aram_image_mod, audioload_mod, audio_req_mod, audiocmp_mod, audioab_mod, audio_level_mod, items_mod, sprites_mod, blocks_mod, ledger_mod, routines_mod, room_mod, death_mod, credits_mod, tas_mod, locate_mod, gb_trace_mod, save_mod, correspond_mod, oracle_mod, enemy_oracle_mod, queen_oracle_mod, hud_oracle_mod, title_oracle_mod, pause_oracle_mod, scenario_mod, residue_mod, duration_mod, transition_mod, dispatch_mod, trace_mod, audio_parity_mod, audio_sites_mod, roster_mod, debug_tables_mod, warp_mod, crawl_mod, warp_grade_mod, scheme_grade_mod, areas_mod, full_ref_cover_mod }) |mod| {
         // Separate from the list above only because these need the working
         // directory set: both find the retail ROM by relative path.
         addAudio(b, mod);
@@ -1010,28 +1010,28 @@ pub fn build(b: *std.Build) void {
     b.step("disasm", "Disassemble a region of the ROM: [bank] [start] [end] [entry...]")
         .dependOn(&disasm_run.step);
 
-    // ---- The EJRTQ oracle (colorization Step 3) ----------------------------
+    // ---- The full scheme's slot assignment (colorization Step 3) ----------
     // By hand only: it needs EJRTQ's patch in reference/, which no gate has.
-    const ejrtq_mod_exe = b.createModule(.{
-        .root_source_file = b.path("src/ejrtq_main.zig"),
+    const full_ref_exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/full_ref_main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    ejrtq_mod_exe.addOptions("build_options", options);
-    ejrtq_mod_exe.addImport("testrom", testrom_mod);
+    full_ref_exe_mod.addOptions("build_options", options);
+    full_ref_exe_mod.addImport("testrom", testrom_mod);
     // The coverage pass reads the area map, which brings the audio data.
-    addAudio(b, ejrtq_mod_exe);
+    addAudio(b, full_ref_exe_mod);
     // `-- cgb` boots the patched ROM in SameBoy (Step 5).
     if (have_sameboy) {
-        ejrtq_mod_exe.link_libc = true;
-        addSameBoyApu(b, ejrtq_mod_exe, sameboy_root);
+        full_ref_exe_mod.link_libc = true;
+        addSameBoyApu(b, full_ref_exe_mod, sameboy_root);
     }
-    const ejrtq_run = b.addRunArtifact(b.addExecutable(.{ .name = "ejrtq", .root_module = ejrtq_mod_exe }));
-    ejrtq_run.setCwd(b.path("."));
-    ejrtq_run.has_side_effects = true;
-    if (b.args) |args| ejrtq_run.addArgs(args);
-    b.step("ejrtq", "Extract EJRTQ's palette slots into src/full_assign.zig; `-- check` it, `-- cover` the recording (Mesen), `-- cgb` validate in SameBoy (needs reference/Metroid_II_EJRTQ_Colorization_v1.3.zip)")
-        .dependOn(&ejrtq_run.step);
+    const full_ref_run = b.addRunArtifact(b.addExecutable(.{ .name = "full-assign", .root_module = full_ref_exe_mod }));
+    full_ref_run.setCwd(b.path("."));
+    full_ref_run.has_side_effects = true;
+    if (b.args) |args| full_ref_run.addArgs(args);
+    b.step("full-assign", "Write the full scheme's palette slots (src/full_assign.zig) from its EJRTQ reference; `-- check` it, `-- cover` the recording (Mesen), `-- cgb` validate in SameBoy (needs reference/Metroid_II_EJRTQ_Colorization_v1.3.zip)")
+        .dependOn(&full_ref_run.step);
 
     // ---- Logic ledger ------------------------------------------------------
     // ReleaseFast: it emulates minutes of the game and disassembles six banks
@@ -1716,7 +1716,7 @@ fn addSameBoyApu(b: *std.Build, mod: *std.Build.Module, root: []const u8) void {
         "-DGB_COPYRIGHT_YEAR=\"2025\"",
     };
     mod.addCSourceFile(.{ .file = b.path("src/sbref.c"), .flags = &flags });
-    // The EJRTQ oracle's CGB check (colorization Step 5) runs a cartridge
+    // The full scheme's CGB check (colorization Step 5) runs a cartridge
     // with its own write hook. Small, so every SameBoy user carries it.
     mod.addCSourceFile(.{ .file = b.path("src/sbcgb.c"), .flags = &flags });
     // The core as SameBoy builds it: without UBSan, which Zig turns on for C in

@@ -1,6 +1,6 @@
-//! `zig build ejrtq [-- check | cover] [-- --zip <path>] [-- --dir <path>]`:
-//! the EJRTQ oracle (colorization Steps 3 and 5). Run by hand; no gate runs
-//! it.
+//! `zig build full-assign [-- check | cover] [-- --zip <path>] [-- --dir <path>]`:
+//! the full scheme's slot assignment, read from its EJRTQ reference
+//! (colorization Steps 3 and 5). Run by hand; no gate runs it.
 //!
 //! `cover` also replays the 100% recording (`--dir`, default
 //! `reference/metroid2-100p-recording/`) on the original ROM in Mesen, and
@@ -14,14 +14,14 @@
 
 const std = @import("std");
 const rom_mod = @import("rom.zig");
-const ejrtq = @import("ejrtq.zig");
+const ref = @import("full_ref.zig");
 const ips = @import("ips.zig");
-const cover_mod = @import("ejrtq_cover.zig");
+const cover_mod = @import("full_ref_cover.zig");
 const gb_trace = @import("gb_trace.zig");
 const areas = @import("areas.zig");
 const map = @import("map.zig");
-const cgb = @import("ejrtq_cgb.zig");
-const cgb_run = if (build_options.have_sameboy) @import("ejrtq_cgb_run.zig") else struct {};
+const cgb = @import("full_ref_cgb.zig");
+const cgb_run = if (build_options.have_sameboy) @import("full_ref_cgb_run.zig") else struct {};
 const gbc_oracle = @import("gbc_oracle.zig");
 const save = @import("save.zig");
 
@@ -44,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
     var write_patched: ?[]const u8 = null;
     var cgb_mode: enum { off, check, probe } = .off;
     var dir_path: []const u8 = default_dir;
-    var zip_path: []const u8 = ejrtq.default_zip;
+    var zip_path: []const u8 = ref.default_zip;
     var args = std.process.Args.Iterator.init(init.minimal.args);
     _ = args.next();
     while (args.next()) |arg| {
@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) !void {
             dir_path = args.next() orelse return fail(out, "--dir needs a path", .{});
         } else if (std.mem.eql(u8, arg, "--zip")) {
             zip_path = args.next() orelse return fail(out, "--zip needs a path", .{});
-        } else return fail(out, "unknown argument `{s}`; usage: zig build ejrtq [-- check | cover] [-- --zip <path>] [-- --dir <path>]", .{arg});
+        } else return fail(out, "unknown argument `{s}`; usage: zig build full-assign [-- check | cover] [-- --zip <path>] [-- --dir <path>]", .{arg});
     }
     if (check and cover) return fail(out, "`check` and `cover` don't combine: `cover` rewrites the file", .{});
 
@@ -71,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
     _ = try rom_mod.ingest(a, rom, null);
     const zip = cwd.readFileAlloc(io, zip_path, a, .limited(16 << 20)) catch |e|
         return fail(out, "can't read {s} ({t}): put EJRTQ's v1.3 zip there, or pass --zip", .{ zip_path, e });
-    const patched = ejrtq.patchedRom(a, rom, zip) catch |e| switch (e) {
+    const patched = ref.patchedRom(a, rom, zip) catch |e| switch (e) {
         error.WrongPatch => return fail(out, "{s} is not EJRTQ v1.3: expected `{s}` with SHA-1 {s}", .{ zip_path, ips.ejrtq_name, ips.ejrtq_sha1 }),
         else => return e,
     };
@@ -81,7 +81,7 @@ pub fn main(init: std.process.Init) !void {
         try out.print("wrote the patched ROM to {s}\n", .{p});
     }
 
-    var x = try ejrtq.extract(a, rom, patched);
+    var x = try ref.extract(a, rom, patched);
     try report(out, x);
     if (cover) x.seen = try runCover(a, io, out, rom, dir_path, init.environ_map.get("HOME") orelse "", x.slots);
     if (cgb_mode != .off) {
@@ -96,34 +96,34 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var colour_buf: [64]u16 = undefined;
-    const existing: ?[]const u8 = cwd.readFileAlloc(io, ejrtq.output_path, a, .limited(1 << 20)) catch |e| switch (e) {
+    const existing: ?[]const u8 = cwd.readFileAlloc(io, ref.output_path, a, .limited(1 << 20)) catch |e| switch (e) {
         error.FileNotFound => null,
         else => return e,
     };
-    const text = try ejrtq.render(a, x, ejrtq.handSection(existing));
-    if (ejrtq.colourLeak(text, x.colours.values(&colour_buf))) |leak|
+    const text = try ref.render(a, x, ref.handSection(existing));
+    if (ref.colourLeak(text, x.colours.values(&colour_buf))) |leak|
         return fail(out, "line {d} of the rendered file has a number equal to one of EJRTQ's colours; nothing written", .{leak.line});
 
-    const settle = try ejrtq.unsettled(a, x);
+    const settle = try ref.unsettled(a, x);
     for (settle.open) |u| try out.print("conflict: {s} id ${X:0>2} has no hand choice in {s}_choices\n", .{ u.table, u.id, u.table });
     for (settle.stale) |u| try out.print("stale: {s}_choices names id ${X:0>2}, which no edited position has\n", .{ u.table, u.id });
 
     if (check) {
-        const have = existing orelse return fail(out, "{s} does not exist; run `zig build ejrtq`", .{ejrtq.output_path});
+        const have = existing orelse return fail(out, "{s} does not exist; run `zig build full-assign`", .{ref.output_path});
         if (!std.mem.eql(u8, have, text)) {
             try diffLines(out, have, text);
-            return fail(out, "{s} differs from a fresh extraction", .{ejrtq.output_path});
+            return fail(out, "{s} differs from a fresh extraction", .{ref.output_path});
         }
-        try out.print("check: {s} agrees with the extraction\n", .{ejrtq.output_path});
+        try out.print("check: {s} agrees with the extraction\n", .{ref.output_path});
     } else {
-        try cwd.writeFile(io, .{ .sub_path = ejrtq.output_path, .data = text });
-        try out.print("wrote {s} ({d} bytes)\n", .{ ejrtq.output_path, text.len });
+        try cwd.writeFile(io, .{ .sub_path = ref.output_path, .data = text });
+        try out.print("wrote {s} ({d} bytes)\n", .{ ref.output_path, text.len });
     }
     // The file stands, even with an open conflict, so its choices can be made.
     if (settle.open.len != 0 or settle.stale.len != 0) return fail(out, "settle the conflicts above in the hand-edited section", .{});
 }
 
-fn report(out: *std.Io.Writer, x: ejrtq.Extraction) !void {
+fn report(out: *std.Io.Writer, x: ref.Extraction) !void {
     var tiles: usize = 0;
     var per_slot: [8]usize = @splat(0);
     for (x.slots) |r| {
@@ -232,7 +232,7 @@ pub fn coverParts(a: std.mem.Allocator, io: std.Io, rom: []const u8, dir_path: [
     for (threads[0..n], 0..) |*t, l| t.* = try std.Thread.spawn(.{}, Lane.go, .{ jobs, &next, env, @as(u8, @intCast(l)) });
     for (threads[0..n]) |t| t.join();
     for (jobs) |j| if (j.err) |err| {
-        std.debug.print("ejrtq: {s}: {s}\n", .{ j.path, @errorName(err) });
+        std.debug.print("full-assign: {s}: {s}\n", .{ j.path, @errorName(err) });
         return error.PassFailed;
     };
     const parts = try a.alloc(cover_mod.Part, jobs.len);
@@ -241,7 +241,7 @@ pub fn coverParts(a: std.mem.Allocator, io: std.Io, rom: []const u8, dir_path: [
 }
 
 /// The coverage pass: run it, report it, and return the `seen` strings.
-fn runCover(a: std.mem.Allocator, io: std.Io, out: *std.Io.Writer, rom: []const u8, dir_path: []const u8, home: []const u8, slots: []const ejrtq.RegionSlots) ![]const []const u8 {
+fn runCover(a: std.mem.Allocator, io: std.Io, out: *std.Io.Writer, rom: []const u8, dir_path: []const u8, home: []const u8, slots: []const ref.RegionSlots) ![]const []const u8 {
     const srcs = try cover_mod.sources(a);
     try out.print("coverage: {d} source tiles; replaying {s} (first run takes a while)\n", .{ srcs.len, dir_path });
     try out.flush();
@@ -328,17 +328,17 @@ fn runCgb(
     out: *std.Io.Writer,
     rom: []const u8,
     patched: []const u8,
-    x: ejrtq.Extraction,
+    x: ref.Extraction,
     probe: bool,
     dir_path: []const u8,
     home: []const u8,
 ) !bool {
     if (comptime !build_options.have_sameboy) {
-        try out.print("ejrtq: cgb needs vendor/sameboy (see docs/setup.md)\n", .{});
+        try out.print("full-assign: cgb needs vendor/sameboy (see docs/setup.md)\n", .{});
         return false;
     } else {
         const boot = std.Io.Dir.cwd().readFileAlloc(io, gbc_oracle.boot_path, a, .limited(1 << 16)) catch |e| {
-            try out.print("ejrtq: can't read {s} ({t}); build SameBoy's boot ROMs\n", .{ gbc_oracle.boot_path, e });
+            try out.print("full-assign: can't read {s} ({t}); build SameBoy's boot ROMs\n", .{ gbc_oracle.boot_path, e });
             return false;
         };
         const srcs = try cover_mod.sources(a);
@@ -481,7 +481,7 @@ fn checkScenario(
 }
 
 fn fail(out: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
-    try out.print("ejrtq: " ++ fmt ++ "\n", args);
+    try out.print("full-assign: " ++ fmt ++ "\n", args);
     try out.flush();
     std.process.exit(1);
 }

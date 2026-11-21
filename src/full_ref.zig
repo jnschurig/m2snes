@@ -1,8 +1,8 @@
-//! The EJRTQ oracle, extraction half (colorization Step 3).
+//! The full scheme's palette slots, from its reference (colorization Step 3).
 //!
-//! EJRTQ's GBC colorization of Metroid II (romhacking.net hack 4388, v1.3)
-//! gives every graphics tile of banks 5-8 a palette slot, and the port takes
-//! those slots, not its colours. This reads them **statically** from the
+//! The reference is EJRTQ's GBC colorization of Metroid II (romhacking.net
+//! hack 4388, v1.3). It gives every graphics tile of banks 5-8 a palette
+//! slot, and the full scheme takes those slots, not its colours. This reads them **statically** from the
 //! patched ROM, built in memory and never written, and renders them as
 //! `src/full_assign.zig`, which is committed. `docs/colorization.md` is the
 //! model this relies on, with an address for each claim.
@@ -24,8 +24,8 @@
 //!    EJRTQ's colours agree on the shades those tiles use. Colours are compared
 //!    in memory; none is rendered.
 //!
-//! Coverage over the recording is `ejrtq_cover.zig`; the check against the
-//! patched ROM in SameBoy is `ejrtq_cgb.zig` (Step 5).
+//! Coverage over the recording is `full_ref_cover.zig`; the check against the
+//! patched ROM in SameBoy is `full_ref_cgb.zig` (Step 5).
 
 const std = @import("std");
 const offsets = @import("offsets.zig");
@@ -523,7 +523,7 @@ pub fn extract(allocator: std.mem.Allocator, rom: []const u8, patched: []const u
 
 /// The line that starts the hand-edited section. Everything from it on is
 /// kept when the file is regenerated.
-pub const hand_marker = "// ---- Hand-edited below this line. `zig build ejrtq` keeps it as it is. ----";
+pub const hand_marker = "// ---- Hand-edited below this line. `zig build full-assign` keeps it as it is. ----";
 
 pub const default_hand =
     hand_marker ++ "\n" ++
@@ -542,9 +542,9 @@ const preamble =
     \\//! The `full` scheme's palette assignment: which palette slot each tile
     \\//! and sprite is drawn in (colorization F2).
     \\//!
-    \\//! **Generated** by `zig build ejrtq` from EJRTQ's GBC colorization of
+    \\//! **Generated** by `zig build full-assign` from EJRTQ's GBC colorization of
     \\//! Metroid II (v1.3, on romhacking.net), except the hand-edited section
-    \\//! at the end. `zig build ejrtq -- check` diffs this file against a fresh
+    \\//! at the end. `zig build full-assign -- check` diffs this file against a fresh
     \\//! extraction. `docs/colorization.md` describes the model and names the
     \\//! hack. (Not by its number here: the leak check would read it as a
     \\//! colour value.)
@@ -558,7 +558,7 @@ const preamble =
     \\
     \\/// A graphics region of `offsets.zig`, and one slot digit per 16-byte tile,
     \\/// in ROM order. Sprites and the background share them. `seen` is what
-    \\/// the recording showed of each tile (`zig build ejrtq -- cover`): `.`
+    \\/// the recording showed of each tile (`zig build full-assign -- cover`): `.`
     \\/// never, so its slot is unobserved; `b` on the background or window
     \\/// only; `s` as a sprite only; `+` both. Empty: coverage not run.
     \\pub const Region = struct { name: []const u8, slots: []const u8, seen: []const u8 = "" };

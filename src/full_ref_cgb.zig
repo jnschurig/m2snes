@@ -1,7 +1,7 @@
-//! The EJRTQ oracle's correctness check (colorization Step 5): the static
+//! Validation of the full scheme's reference (colorization Step 5): the static
 //! model against the patched ROM running on a Game Boy Color.
 //!
-//! SameBoy (`sbcgb.c`, linked by `ejrtq_cgb_run.zig`) boots the patched ROM
+//! SameBoy (`sbcgb.c`, linked by `full_ref_cgb_run.zig`) boots the patched ROM
 //! and reports, at a chosen frame, both VRAM banks, OAM and which ROM tile
 //! each VRAM tile was last copied from. The model says:
 //!  - **background and window:** the attribute byte (VRAM bank 1) under each

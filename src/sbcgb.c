@@ -1,5 +1,5 @@
-// SameBoy as a Game Boy Color running a CGB-only ROM: the EJRTQ oracle's
-// correctness check (colorization Step 5).
+// SameBoy as a Game Boy Color running a CGB-only ROM: the full scheme's
+// reference check (colorization Step 5).
 //
 // Boots `rom` on a CGB with SameBoy's own boot ROM, optionally with a battery
 // save, holds the given buttons frame by frame, and stops after `frames`
@@ -7,7 +7,7 @@
 // banks, OAM, the LCD registers, EJRTQ's WRAM table at $D200-$D37F, and, per
 // VRAM tile, which ROM tile was last copied there.
 //
-// That last one is tracked the way `src/ejrtq_cover.zig` tracks it in Mesen.
+// That last one is tracked the way `src/full_ref_cover.zig` tracks it in Mesen.
 // A write to a tile's first byte in VRAM bank 0 takes its source from HL-1,
 // HL or DE, in the bank mapped at $4000, when that address is the first byte
 // of a graphics tile (`tile_start`, one bit per ROM byte: regions need not be
