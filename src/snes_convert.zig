@@ -390,8 +390,8 @@ pub const cell_bytes: usize = 4;
 pub const screens_per_bank: usize = map.screens_per_bank;
 
 /// After a bank's 256 cells, one byte per cell: its colour area for the
-/// `full` scheme (`areas.Area`), at this offset in the bank's `map_cells`
-/// blob. From `areas.tableOf`, so built from the ROM and never committed.
+/// `full` scheme (`areas.Area`, with `areas.nest_bit` on a Metroid's room),
+/// at this offset in the bank's `map_cells` blob. From `areas.tableOf`, so built from the ROM and never committed.
 pub const area_offset: usize = map.cells * cell_bytes;
 
 /// The one cell in bank $A holding a null pointer. It is not the blank screen -
@@ -1734,15 +1734,15 @@ test "converting the whole ROM leaves nothing unresolved" {
     try testing.expectEqual(@as(usize, 7), set.map_screens.len);
     try testing.expectEqual(@as(usize, tileset.solidity_bytes), set.solidity.bytes.len);
 
-    // Each bank's cells carry an area per cell after them: every in-use
-    // cell's a real area, and every blank cell's none.
+    // Each bank's cells carry an area per cell after them (and the nest
+    // bit): every in-use cell's a real area, and every blank cell's none.
     for (set.map_cells) |cb| {
         try testing.expectEqual(area_offset + map.cells, cb.bytes.len);
         for (0..map.cells) |ci| {
             const in_use = cb.bytes[ci * cell_bytes] != 0;
             const a = cb.bytes[area_offset + ci];
             if (in_use) {
-                try testing.expect(a < areas.Area.count);
+                try testing.expect(a & ~areas.nest_bit < areas.Area.count);
             } else {
                 try testing.expectEqual(areas.none, a);
             }

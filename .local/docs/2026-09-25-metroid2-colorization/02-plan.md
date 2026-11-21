@@ -5,6 +5,8 @@ updated:
   - 2026-11-21T05:00:42Z
   - 2026-11-21T05:06:10Z
   - 2026-11-21T05:24:48Z
+  - 2026-11-21T06:18:43Z
+  - 2026-11-21T19:21:16Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -115,25 +117,46 @@ two other ways:
         on the new file.
   - [x] Commit: "full: EJRTQ extraction and assignment tables".
 
-- [ ] **Step 4: Area map and pairing**
-  - [ ] Model: area = f(map bank, screen), with the Queen's room as its own
+- [x] **Step 4: Area map and pairing**
+  - [x] Model: area = f(map bank, screen), with the Queen's room as its own
         area (the cart can also key it on `$D08B = $11`, the room mode the
-        port already mirrors). Commit `src/areas.zig` as seed
-        screens per area plus boundary cuts, flood-filled over the world's
-        screen connectivity (the crawl's), so it doesn't hand-list ~1,800
-        screens.
-  - [ ] Builder: generate the per-screen area table into the cart at build
+        port already mirrors). Commit `src/areas.zig` as **one seed per
+        room** plus scroll cuts for gates inside a room, flood-filled over
+        the ROM's scroll joins only. (Amended 2026-11-21: the crawl's door
+        graph has every late-game shortcut between areas, so door-level cuts
+        would be dozens. James chose seed-per-room.)
+  - [x] `zig build areas -- draft`: the first draft of the seeds from the
+        100% recording's first-visit Metroid counts, bucketed by the gates'
+        `IF_MET_LESS` thresholds. Mixed and unvisited rooms are fixed by hand
+        against the GIF.
+  - [x] Builder: generate the per-screen area table into the cart at build
         time from `areas.zig` + the ROM, like the other ROM-derived cart
         data. It is never committed.
-  - [ ] `zig build areas`: render each map bank with the area overlay to
+  - [x] `zig build areas`: render each map bank with the area overlay to
         `build-out/` (ROM-derived, never committed), for comparison with
         `metroid-2-areas.gif`.
-  - [ ] Unit tests: every reachable screen has exactly one area, and the
+  - [x] Unit tests: every reachable screen has exactly one area, and the
         shafts between areas fall where the GIF puts them. The flood fill
         has a ROM-free test on a synthetic grid.
-  - [ ] Propose the M2 → Samus Returns pairing, with one representative
+  - [x] Propose the M2 → Samus Returns pairing, with one representative
         colour per area. **Checkpoint: James approves.**
-  - [ ] Commit: "full: area map".
+  - [x] Commit: "full: area map".
+
+- [x] **Step 4a: The acid and nest colour sets**
+  - [x] `areas.zig`: `nest` is a flag on every cell of a room with a
+        Metroid spawn record (`roster.metroids`), bit 7 of the cart's
+        per-cell byte, beside the area; never on the Queen's room.
+  - [x] `acid` is keyed at run time, not in the table: the engine's loaded
+        metatile table is a lava table (6-8). That is the Game Boy's own
+        notion of an acid cave; the static readings (`zig build areas --
+        acid`) disagree with what the recording showed in 38 of 75 rooms.
+        The engine side lands in Step 8. (Amended 2026-11-21.)
+  - [x] `zig build areas` tints `nest` rooms and marks lava rooms (the
+        recording's tables where seen, the cart's reading elsewhere).
+  - [x] Unit tests: the precedence (queen > nest > acid > area) as a pure
+        function, ROM-free; on the ROM, every Metroid's room carries the
+        nest bit and the Queen's room doesn't.
+  - [x] Commit: "full: acid and nest colour sets".
 
 - [ ] **Step 5: The EJRTQ oracle — validation and coverage**
   - [ ] Mesen pass over `reference/metroid2-100p-recording/` on the original
@@ -168,6 +191,10 @@ two other ways:
         `$20-$6F` first (BG1's room readout and anything else), then move the
         HUD's 4bpp palettes off `$10-$1F` (BG3 slots 4-7) to free palettes
         there.
+  - [ ] Damaging tiles: list the BG tiles the ROM's damage data marks as
+        hurting Samus, per tileset, and give them a slot of their own (an
+        override in `full_assign.zig`'s hand-edited section) where the
+        tileset has one free. Report the tilesets that don't, for James.
   - [ ] Zig side: `snes_target.playWord`/`titleWord`/`windowWord` and their
         decoders accept a slot. Graders and `SampleTile` ignore the palette
         bits. ROM-free unit tests round-trip each encoder/decoder with
@@ -182,6 +209,13 @@ two other ways:
         3 → 1, anything else → 3. `mono`/`gbc` keep today's 0/1 mapping.
   - [ ] Frozen enemies: an enemy whose `iceCounter` (+$0B) is non-zero draws
         in slot 3 (EJRTQ `01:7B87`), and the OBP1 swap doesn't override it.
+  - [ ] Metroid damage: a Metroid's (not the Queen's) OBJ colours step
+        towards red by the fraction of its species' full health left, a few
+        steps, `full` only. Design the CGRAM side first: one Metroid on
+        screen at a time lets one palette be rewritten in vblank; check
+        that holds (larval rooms have several) or give each step a palette.
+        The OBP1 swap still applies over it. ROM-free unit tests on the
+        step function.
   - [ ] Verify: `zig build verify` green, and the object screenshots are
         unchanged in `gbc`.
   - [ ] Commit: "full: per-sprite palettes".
@@ -198,7 +232,8 @@ two other ways:
   - [ ] L cycles three schemes, with the badge glyphs for `FULL`. An older
         cart reading id 2 already falls back.
   - [ ] Placeholder colours: distinct hues per area. Real colours come in
-        Step 9.
+        Step 9. `acid` and each area's `nest` variant are colour sets like
+        the areas.
   - [ ] Verify: `zig build verify` green, and a scenario boot in `full`
         (through the SRAM scheme byte, not WRAM pokes) shows non-palette-0
         words.
@@ -207,7 +242,11 @@ two other ways:
 - [ ] **Step 9: Samus Returns colours**
   - [ ] Pick per-area colours by eye from the reference screenshots, for each
         area's used slots (and the Queen's room); keep look-alike slots
-        equal, colour 0 black and colour 3 darkest. Check Samus, the
+        equal, colour 0 black and colour 3 darkest. `acid` mostly purple
+        (`2.52.56`, `2.43.02`), each area's `nest` variant leaning green
+        (`2.46.33`, `3.04.25`, `3.16.21`), damaging tiles strongly red (`2.56.04`), the HUD and the
+        item-name window blue with white text (`2.40.27`), and the Metroid
+        damage steps ending red. Check Samus, the
         Metroids and the credits by eye on the original art.
   - [ ] Publish a swatch sheet: area, Samus Returns pairing, and a Mesen
         screenshot per area. **Checkpoint: James approves; tuning is
@@ -219,6 +258,9 @@ two other ways:
         one room per area, a Metroid fight, the Queen, the credits), each
         visible BG3/BG2 word's palette and each object's palette equal
         `full_assign.zig` + the area table.
+  - [ ] Set rung: at an acid cave and a Metroid room, CGRAM holds the
+        `acid`/`nest` set, and a Metroid hit down a step shows the next
+        damage step.
   - [ ] Colour rung: CGRAM equals the area's tables after the DMG registers
         are applied, at those states plus one mid-fade state (a door
         transition or the title fade), checked against the full-brightness

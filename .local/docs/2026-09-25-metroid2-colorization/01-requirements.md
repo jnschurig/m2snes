@@ -6,6 +6,8 @@ updated:
   - 2026-11-21T05:02:20Z
   - 2026-11-21T05:21:46Z
   - 2026-11-21T05:24:48Z
+  - 2026-11-21T06:18:43Z
+  - 2026-11-21T19:21:16Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -101,6 +103,16 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
 - Each Metroid II area is paired with the same-or-similar Samus Returns area
   (the surface and areas 1-8, numbered on `metroid-samus-returns-areas.png`).
   Design proposes the pairing, and James approves it.
+- **Colour sets beyond the areas** (amended 2026-11-21, James): two room
+  kinds take another colour set in place of their area's:
+  - `acid`: the caves whose acid level changes with the Metroid count (rooms
+    drawn with one of the lava metatile tables). One set, the same
+    everywhere: the acid caves are like an area of their own;
+  - `nest`: rooms with a Metroid spawn record. A variant of each area's
+    set, leaning green.
+  Precedence: queen > nest > acid > area. Both are derived from the ROM at
+  build time, so the cart's per-screen table gains no committed data beyond
+  the rule.
 - No committed file contains ROM bytes (the `src/policy.zig` scan still
   passes) or EJRTQ colour values.
 
@@ -115,7 +127,18 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
 - **Samus** uses Samus Returns' colours: the Power Suit, and the Varia Suit
   after it is collected. Her colours are the same in every area.
 - **Other sprites:** Metroids, enemies, beams and drops, per OBJ slot.
-- **HUD:** its own palette(s), legible in every area.
+- **HUD:** its own palette(s), legible in every area: blue with white text,
+  as Samus Returns' message boxes (`2.40.27`). The item-name window uses the
+  same.
+- **Acid caves:** mostly purple, as Samus Returns' acid areas (`2.52.56`,
+  `2.43.02`).
+- **Metroid rooms:** each area's colours leaning green, as Samus Returns'
+  Metroid rooms
+  (`2.46.33`, `3.04.25`, `3.16.21`).
+- **Damaging tiles** (corals, spikes: tiles the ROM's damage data marks as
+  hurting Samus): strongly red, as Samus Returns' corals (`2.56.04`). They
+  take a slot of their own, overriding EJRTQ's, where the tileset has one
+  free; design reports any tileset where they can't.
 - **Look-alike slots** get identical colours wherever F2 says they must, so
   hidden passages stay hidden.
 - **Colour 0** is black in every BG slot. SNES BG3 colour 0 shows the shared
@@ -148,6 +171,11 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
   the current area. The colours change when the area changes.
 - Run-time palette changes (F1's list) happen at the same moment as in the
   game, in our colours.
+- **Metroid damage** (new; neither the original nor EJRTQ does it): a
+  Metroid (larval, Alpha to Omega; not the Queen) shifts towards red as its
+  health falls, in a few steps by the fraction of its species' full health
+  left. The OBP1 hit flash still shows over it. The Queen is left out: her
+  AI already shows her health.
 - **Fades and flashes** work as in `gbc`: the DMG registers (BGP, OBP0,
   OBP1) remap the four shades within every slot, at the original's timing.
   Fades dim and restore the colours. This is checked, not assumed.
@@ -175,7 +203,9 @@ No rung references EJRTQ, its patch or its recording.
   - colour 3 is the darkest colour in every slot;
   - every room has an area;
   - every area has a pairing and complete tables;
-  - no scheme puts the `Fatal` magenta in colour 0.
+  - no scheme puts the `Fatal` magenta in colour 0;
+  - the set precedence (queen > nest > acid > area), on synthetic rooms;
+  - the Metroid damage steps, on synthetic health values.
 - **Fault checks:** all-slot-0 fails the assignment rung. One area's tables
   shown in another area fail the colour rung. A look-alike class given two
   colours fails its test.
@@ -200,6 +230,8 @@ No rung references EJRTQ, its patch or its recording.
     shows colours that differ between areas and suit that area's Samus
     Returns inspiration. Samus wears her Samus Returns colours.
   - A known hidden passage is not visible.
+  - An acid cave is purple, a Metroid room green, corals red, the HUD blue
+    with white text, and a Metroid reddens as it is hit.
   - Fails: a single-palette play field (every tile the same colours), two
     areas with the same colours, or a visible hidden block.
   - James signs off on the colours.

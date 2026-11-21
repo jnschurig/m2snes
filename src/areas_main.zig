@@ -17,6 +17,7 @@ const map = @import("map.zig");
 const roster = @import("roster.zig");
 const screens = @import("screens.zig");
 const areas = @import("areas.zig");
+const warp = @import("warp.zig");
 
 const out_dir = "build-out/areas";
 
@@ -31,6 +32,8 @@ const ix_wall = 2;
 const ix_label = 3;
 const ix_cut = 4;
 const ix_seed = 5;
+const ix_nest = 6;
+const ix_lava = 7;
 const ix_tint = 8;
 
 const hues = [_][3]u8{
@@ -60,6 +63,8 @@ fn palette() [ix_tint + hues.len * 4][3]u8 {
     pal[ix_label] = .{ 0xFF, 0xFF, 0x00 };
     pal[ix_cut] = .{ 0xFF, 0x00, 0x00 };
     pal[ix_seed] = .{ 0xFF, 0x00, 0xFF };
+    pal[ix_nest] = .{ 0x40, 0xFF, 0x40 };
+    pal[ix_lava] = .{ 0xA0, 0x40, 0xFF };
     for (hues, 0..) |h, i| for (0..4) |s| {
         // Shade 0 is the lightest; 3 the darkest.
         const k: u16 = 256 - @as(u16, @intCast(s)) * 60;
@@ -210,6 +215,88 @@ fn draft(w: roster.World, v: FirstVisit, out: *std.Io.Writer) !void {
     }
 }
 
+/// `zig build areas -- acid`: per room, whether the cart's reading of its
+/// tileset (`warp.assignWalked`) is a lava table, against the tables the
+/// recording's Game Boy showed there at any count. The acid set keys on the
+/// first, so the two must agree on which rooms are acid caves.
+const Lava = struct {
+    /// The cart's static reading (`warp.assignWalked`).
+    cart: [map.bank_count][map.cells]bool = @splat(@splat(false)),
+    /// What the recording's Game Boy showed, at any count; null where unseen.
+    gb: [map.bank_count][map.cells]?bool = @splat(@splat(null)),
+
+    fn load(io: std.Io, gpa: std.mem.Allocator, rom: []const u8) !Lava {
+        var l: Lava = .{};
+        const walked = try warp.loadWalked(gpa, rom);
+        var asg = try warp.assignWalked(gpa, rom, walked);
+        defer asg.deinit(gpa);
+        for (asg.cells) |c| {
+            const ch = c.choice orelse continue;
+            l.cart[c.bank - map.first_bank][@as(usize, c.y) * map.grid_w + c.x] = warp.isLavaTable(ch.tiletable);
+        }
+        const tsv = std.Io.Dir.cwd().readFileAlloc(io, recording_tsv, gpa, .limited(1 << 22)) catch return l;
+        var lines = std.mem.tokenizeScalar(u8, tsv, '\n');
+        _ = lines.next();
+        while (lines.next()) |line| {
+            var cols = std.mem.tokenizeScalar(u8, line, '\t');
+            _ = cols.next();
+            _ = cols.next();
+            const bank = try std.fmt.parseInt(u8, cols.next().?, 16);
+            const cell = try std.fmt.parseInt(u8, cols.next().?, 16);
+            _ = cols.next();
+            _ = cols.next();
+            const t = try std.fmt.parseInt(u8, cols.next().?, 10);
+            if (bank < map.first_bank or bank > map.last_bank) continue;
+            const g = &l.gb[bank - map.first_bank][cell];
+            g.* = (g.* orelse false) or warp.isLavaTable(@intCast(t));
+        }
+        return l;
+    }
+
+    /// The recording where it saw the cell, the cart's reading elsewhere.
+    fn best(self: Lava, bi: usize, ci: usize) bool {
+        return self.gb[bi][ci] orelse self.cart[bi][ci];
+    }
+};
+
+fn acidCheck(io: std.Io, gpa: std.mem.Allocator, rom: []const u8, w: roster.World, out: *std.Io.Writer) !void {
+    const lava = try Lava.load(io, gpa, rom);
+    const cart = lava.cart;
+    const gb = lava.gb;
+    var top: u16 = 0;
+    for (w.room) |b| for (b) |r| if (r != roster.World.none) {
+        top = @max(top, r + 1);
+    };
+    var acid_rooms: usize = 0;
+    for (0..top) |r| {
+        var any_cart = false;
+        var all_cart = true;
+        var any_gb = false;
+        var seen_gb = false;
+        var first: ?roster.Place = null;
+        for (0..map.bank_count) |bi| for (0..map.cells) |ci| {
+            if (w.room[bi][ci] != r) continue;
+            if (first == null) first = .{ .bank = map.first_bank + @as(u8, @intCast(bi)), .cell = @intCast(ci) };
+            any_cart = any_cart or cart[bi][ci];
+            all_cart = all_cart and cart[bi][ci];
+            if (gb[bi][ci]) |g| {
+                seen_gb = true;
+                any_gb = any_gb or g;
+            }
+        };
+        if (any_cart) acid_rooms += 1;
+        const disagree = (any_cart != all_cart) or (seen_gb and any_gb != any_cart);
+        if (!any_cart and !any_gb) continue;
+        try out.print("room {d:>3} ${X}:{X:0>2}  cart {s}  gb {s}{s}\n", .{
+            r, first.?.bank, first.?.cell,
+            if (all_cart) "lava" else if (any_cart) "part" else "-",
+            if (!seen_gb) "unseen" else if (any_gb) "lava" else "-",
+            if (disagree) "  DISAGREE" else "",
+        });
+    }
+    try out.print("{d} acid rooms\n", .{acid_rooms});
+}
+
 pub fn main(init: std.process.Init) !void {
     var arena_state = std.heap.ArenaAllocator.init(init.gpa);
     defer arena_state.deinit();
@@ -234,6 +321,11 @@ pub fn main(init: std.process.Init) !void {
     _ = args.next();
     const sub: []const u8 = args.next() orelse "";
 
+    if (std.mem.eql(u8, sub, "acid")) {
+        try acidCheck(init.io, gpa, rom, w, out);
+        return;
+    }
+
     if (std.mem.eql(u8, sub, "draft")) {
         try draft(w, try FirstVisit.load(init.io, gpa), out);
         return;
@@ -241,6 +333,11 @@ pub fn main(init: std.process.Init) !void {
 
     const g = try areas.graphOf(gpa, w);
     var f = try areas.fill(gpa, g, &areas.seeds, &areas.cuts);
+    // The nest bit, on a copy: `f.table` stays the plain areas for the tint.
+    var marked = f.table;
+    const ms = try roster.metroids(gpa, rom);
+    areas.markNests(&marked, w.room, ms);
+    const lava = try Lava.load(init.io, gpa, rom);
     defer f.deinit(gpa);
 
     // `zig build areas -- recording`: tint each cell by the bucket of the
@@ -284,6 +381,13 @@ pub fn main(init: std.process.Init) !void {
             if (c.scroll.block_down) cv.rect(x0, y0 + cell_px - 3, cell_px, 3, ix_wall);
             if (c.scroll.block_left) cv.rect(x0, y0, 3, cell_px, ix_wall);
             if (c.scroll.block_right) cv.rect(x0 + cell_px - 3, y0, 3, cell_px, ix_wall);
+            if (marked[bi][ci] != areas.none and marked[bi][ci] & areas.nest_bit != 0) {
+                cv.rect(x0 + 6, y0 + 6, cell_px - 12, 3, ix_nest);
+                cv.rect(x0 + 6, y0 + cell_px - 9, cell_px - 12, 3, ix_nest);
+                cv.rect(x0 + 6, y0 + 6, 3, cell_px - 12, ix_nest);
+                cv.rect(x0 + cell_px - 9, y0 + 6, 3, cell_px - 12, ix_nest);
+            }
+            if (lava.best(bi, ci)) cv.rect(x0 + 40, y0 + 8, cell_px - 50, 10, ix_lava);
             cv.glyph(x0 + 4, y0 + 4, @intCast(ci >> 4));
             cv.glyph(x0 + 4 + 15, y0 + 4, @intCast(ci & 0xF));
         }

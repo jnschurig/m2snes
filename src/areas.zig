@@ -532,7 +532,53 @@ pub fn tableOf(allocator: std.mem.Allocator, rom: []const u8) !Table {
     var f = try fill(allocator, g, &seeds, &cuts);
     defer f.deinit(allocator);
     if (!f.ok()) return Error.AreaMapIncomplete;
+    const ms = try roster.metroids(allocator, rom);
+    defer allocator.free(ms);
+    markNests(&f.table, w.room, ms);
     return f.table;
+}
+
+// ---- Colour sets --------------------------------------------------------------
+
+/// Bit 7 of a cell's byte in the cart's table: the cell's room has a Metroid
+/// spawn record, so it draws in its area's `nest` variant (green-leaning).
+/// The low bits stay the area.
+pub const nest_bit: u8 = 0x80;
+
+/// Set the nest bit on every cell of each Metroid's room. Never on the
+/// Queen's room: she is no spawn record, and her room keeps her own set.
+pub fn markNests(t: *Table, room: [map.bank_count][map.cells]u16, ms: []const roster.Record) void {
+    for (ms) |m| {
+        if (m.bank < map.first_bank or m.bank > map.last_bank) continue;
+        const r = room[m.bank - map.first_bank][m.cell];
+        if (r == roster.World.none) continue;
+        for (0..map.bank_count) |bi| for (0..map.cells) |ci| {
+            if (room[bi][ci] != r) continue;
+            const v = &t[bi][ci];
+            if (v.* != none and v.* & ~nest_bit != @intFromEnum(Area.queen)) v.* |= nest_bit;
+        };
+    }
+}
+
+/// The colour set a screen draws in.
+pub const Look = union(enum) {
+    area: Area,
+    /// The area's green-leaning variant: a Metroid room.
+    nest: Area,
+    /// The one shared purple set: a cave whose acid level changes.
+    acid,
+};
+
+/// Queen > nest > acid > area. `byte` is the cell's entry in the cart's
+/// table; `lava_loaded` is whether the loaded metatile table is a lava table
+/// (`warp.isLavaTable`), which the engine knows exactly at run time and no
+/// static reading of the ROM does.
+pub fn lookOf(byte: u8, lava_loaded: bool) Look {
+    const area: Area = @enumFromInt(byte & ~nest_bit);
+    if (area == .queen) return .{ .area = .queen };
+    if (byte & nest_bit != 0) return .{ .nest = area };
+    if (lava_loaded) return .acid;
+    return .{ .area = area };
 }
 
 // ---- Tests ------------------------------------------------------------------
@@ -618,6 +664,42 @@ test "the grid wraps, as the screen coordinates do" {
     try testing.expectEqual(@as(u8, 0x03), d.b.cell);
 }
 
+test "the colour set: queen over nest over acid over area" {
+    const q: u8 = @intFromEnum(Area.queen);
+    const a3: u8 = @intFromEnum(Area.area3);
+    try testing.expectEqual(Look{ .area = .queen }, lookOf(q, true));
+    try testing.expectEqual(Look{ .area = .queen }, lookOf(q | nest_bit, true));
+    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, true));
+    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, false));
+    try testing.expectEqual(Look.acid, lookOf(a3, true));
+    try testing.expectEqual(Look{ .area = .area3 }, lookOf(a3, false));
+}
+
+test "a Metroid marks its whole room as a nest, and never the Queen's" {
+    var t: Table = @splat(@splat(none));
+    var room: [map.bank_count][map.cells]u16 = @splat(@splat(roster.World.none));
+    // Room 1: cells $00-$02 in area 6; room 2: cell $10, the Queen's; room 3:
+    // cell $20, area 6 with no Metroid.
+    for (0..3) |i| {
+        room[0][i] = 1;
+        t[0][i] = @intFromEnum(Area.area6);
+    }
+    room[0][0x10] = 2;
+    t[0][0x10] = @intFromEnum(Area.queen);
+    room[0][0x20] = 3;
+    t[0][0x20] = @intFromEnum(Area.area6);
+    const rec = struct {
+        fn r(cell: u8) roster.Record {
+            return .{ .bank = 9, .cell = cell, .number = 0, .sprite = 0, .x = 0, .y = 0, .ai = 0 };
+        }
+    }.r;
+    markNests(&t, room, &.{ rec(0x01), rec(0x01), rec(0x10) });
+    for (0..3) |i| try testing.expectEqual(@intFromEnum(Area.area6) | nest_bit, t[0][i]);
+    try testing.expectEqual(@as(u8, @intFromEnum(Area.queen)), t[0][0x10]);
+    try testing.expectEqual(@as(u8, @intFromEnum(Area.area6)), t[0][0x20]);
+    try testing.expectEqual(none, t[0][0x30]);
+}
+
 test "area labels" {
     try testing.expectEqualStrings("surface", Area.surface.label());
     try testing.expectEqualStrings("area 10", Area.area10.label());
@@ -666,4 +748,22 @@ test "every in-use screen of the ROM has one area, and the gates fall where the 
         errdefer std.debug.print("${X}:{X:0>2}\n", .{ e.at.bank, e.at.cell });
         try testing.expectEqual(e.area, f.areaOf(e.at).?);
     }
+}
+
+test "every Metroid's room is a nest, and the Queen's room isn't" {
+    const gpa = testing.allocator;
+    const rom = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(rom);
+
+    const t = try tableOf(gpa, rom);
+    const ms = try roster.metroids(gpa, rom);
+    defer gpa.free(ms);
+    try testing.expect(ms.len > 0);
+    for (ms) |m| {
+        errdefer std.debug.print("${X}:{X:0>2}\n", .{ m.bank, m.cell });
+        try testing.expect(t[m.bank - map.first_bank][m.cell] & nest_bit != 0);
+    }
+    try testing.expectEqual(@as(u8, @intFromEnum(Area.queen)), t[0xF - map.first_bank][0xFE]);
+    // A room with no Metroid: the ship's.
+    try testing.expectEqual(@as(u8, @intFromEnum(Area.surface)), t[0xF - map.first_bank][0x76]);
 }
