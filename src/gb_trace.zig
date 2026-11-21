@@ -202,7 +202,7 @@ pub fn readRecording(allocator: std.mem.Allocator, mmo: []const u8) Error!Record
 // wanted in memory and are small, so the central directory is walked here
 // instead. Deflate itself is `std.compress.flate`.
 
-fn zipEntry(allocator: std.mem.Allocator, zip: []const u8, name: []const u8) Error![]u8 {
+pub fn zipEntry(allocator: std.mem.Allocator, zip: []const u8, name: []const u8) Error![]u8 {
     if (zip.len < 22) return Error.NotAZip;
     // The end-of-central-directory record, found by scanning back over the
     // comment field it is allowed to carry.

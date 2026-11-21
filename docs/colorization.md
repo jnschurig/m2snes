@@ -1,0 +1,225 @@
+# Colorization: the `full` scheme
+
+The `full` scheme colours each tile and sprite with its own palette. **Which**
+palette each tile gets comes from committed assignment tables, derived once
+from EJRTQ's GBC colorization of Metroid II (romhacking.net hack 4388, v1.3).
+**The colours** are our own, inspired by *Metroid: Samus Returns*. Nothing
+here, and nothing committed, holds an EJRTQ colour value or a ROM byte.
+
+This file records how EJRTQ's patch works, as found by disassembling the
+patched ROM. Every claim cites an address in the patched ROM: `bb:aaaa` is
+bank `bb`, CPU address `aaaa`. Banks `$00-$0F` are the original's (some
+edited); `$10` and above are new.
+
+## The patch
+
+- **Input:** `metroid ii - color (ejrtq) v1.3.ips`, from
+  `Metroid_II_EJRTQ_Colorization_v1.3.zip`. IPS SHA-1
+  `73b6a16f346f3b9b6584c86add217e8e1fbdc86f`. 5,259 records, including RLE.
+- **Size and header:** the ROM grows to 1 MiB, MBC1 (`$0147`), and the header
+  becomes CGB-only (`$0143`).
+- **Bank switching:** `RST $10` (`00:0010`) saves the current bank to `$D44E`
+  and switches to bank `$10`. `RST $18` switches back to `[$D44E]`. Code in
+  bank `$10` keeps `$D04E` (the original's current-bank variable) in step.
+
+### Where the patch writes
+
+| range | what it is |
+|---|---|
+| bank `$00`: 22 ranges, 296 bytes | hooks (below), and the helper block `00:3F60-3FFE` |
+| bank `$01`: `5AAD`, `7A4B`, `7B87` | the enemy-sprite frozen rule, and the fade level for one mode |
+| bank `$03`: `7AA8`, `7C92`, `7CF0`, `7DAD-7E15` | Queen hooks: the head's BG writes get attributes |
+| bank `$05`: `4036`, `4086`, `40B4`, `42D0`, `58DE-595D` | graphics-copy hooks in the door interpreter and the title loader |
+| bank `$05`: `hudBaseTilemap`, `door_pointers`, `door_data`, `7F34-7FAD` | data edits (below) |
+| banks `$05-$08`: 193 tiles redrawn, 59 shade-remapped | art edits (below) |
+| bank `$08`: `metatiles_queen` | new metatiles in free space |
+| bank `$0F`: `mapF_screens` | ten Queen-area screens point at new screen data |
+| bank `$10` | colours (`$4000-$407F`; the Queen's at `$4108-$4117`), init, attribute and palette code |
+| banks `$25-$28` | the attribute tables, one byte per tile of banks `$05-$08` |
+| bank `$21` | a near-copy of bank `$10`'s head (`$4000-$415F`, 95 of 352 bytes differ). The attribute path doesn't read it; its purpose is unconfirmed |
+
+## The model: a palette per ROM tile
+
+**The key is the source tile.** For a graphics tile at bank N, address A in
+the original ROM, its attribute byte is at bank `$20+N`, address A: the first
+byte of that tile's 16 bytes. All other bytes in banks `$25-$28` are zero.
+Every attribute byte is 0-7, a CGB palette number. No byte sets the VRAM
+bank, flip or priority bits, so EJRTQ uses no bank-1 tiles and no flips.
+
+**Copying graphics copies the attributes.** The original's graphics copies
+(`00:060E`, `0622`, `063B`, `0655`, `066F`, `36DE`; `05:4036`, `42D0`,
+`58DE-58F7`) now call `00:3F68`. It does the copy and calls `00:3F74`. With
+the MBC1 upper bits at 1 (`$4100`), `3F74` reads one byte per 16 from the
+same address range in bank `$20+[$D065]`. It writes them to a WRAM table at
+`$D200 + (VRAM destination − $8000) / 16`. `$D065` is the original's source
+bank for the copy, so `[$D065]` is not a separate key. It just tells the
+hook which shadow bank to read.
+
+**The table covers VRAM tiles `$8000-$97FF`**, 384 entries at `$D200-$D37F`.
+Sprites and background share it:
+- **BG and window** (`10:4175`): for each map byte written, tile id `$80-$FF`
+  reads `$D200+id` (VRAM `$8800-$8FFF`), and `$00-$7F` reads `$D300+id` (VRAM
+  `$9000-$97FF`). That is LCDC's signed tile addressing. The result goes to
+  VRAM bank 1 at the same map address.
+- **Sprites** (`10:418C`): tile id reads `$D200+id` (VRAM `$8000-$8FFF`).
+
+The same tile in VRAM `$8800-$8FFF` therefore has the same palette whether a
+sprite or the background draws it.
+
+**Every path that fills the table** is a graphics copy:
+- `loadGame_loadGraphics`' copies (`00:060E-066F`). Boot runs EJRTQ's init
+  first (`00:023C` → `3F60` → `10:4118`);
+- the door interpreter's BG and sprite graphics loads (`05:4036`, `05:42D0`);
+- the title and credits loaders (`05:58DE-58F7`);
+- the queued transfers that the original spreads over frames (`hVramTransfer`,
+  `$FFB1-$FFB6`). `10:41F1` handles each chunk: a chunk that targets tile
+  data (`$8000-$97FF`) copies its attributes through `00:3F9F`; a chunk that
+  targets a tilemap (`$9800-$9FFF`) gets its attributes built from the table
+  (`$D380` → `$D3C0`, `10:424A`) and written to VRAM bank 1 (`10:4441`);
+- door command `$E0` (`10:464A`, hooked at `00:2616`), which copies bytes
+  from any bank to any address. Only the three Queen scripts use it (below).
+
+**Every path that writes a tilemap applies the table:**
+- room rendering through `10:416E`/`4175` (`00:3FC0`, `3FC6`);
+- the HUD row, `10:41E3` (`00:3FD2`, from `05:7F72`, hooked at `05:40B4`):
+  20 tiles from `[$C215]`;
+- block changes (destroyed and respawning blocks): the queue entries at
+  `$DE00` grow from 4 bytes to 8, a tile id and an attribute each
+  (`00:08B8` → `10:4492`). `10:44AC` writes both VRAM banks;
+- tilemap transfers (`10:41F1`, above);
+- the Queen's head (`10:428F`, `430B` into `$D420`, flushed by bank 3's
+  hooks at `03:7DAD`).
+
+Attributes are fixed when a tilemap is written. If the graphics under a
+visible tile change later, its palette is stale until the map is rewritten,
+exactly as in EJRTQ.
+
+## Sprites
+
+`10:432D` runs once a frame (`00:031C`, `2C63` → `00:3FCC` → `10:43B5`).
+It walks shadow OAM (`$C000`) in two passes:
+- **Samus's entries**, `[0, [$D064])`: `$D064` is the original's OAM index
+  after Samus is drawn (`00:0565`, `05D1`). Each entry's palette is the tile's
+  table slot. If the entry has the DMG OBP1 bit, slot 3 becomes 1 and every
+  other slot becomes 3 (`10:41A0-41AF`).
+- **Everything after**, `[[$D064], [$FF8D])`: the same, except that an entry
+  whose palette bits are already non-zero keeps them (`10:41C4-41C8`).
+
+**Frozen enemies:** the enemy-sprite writer (`01:5A9A`, hooked at `01:5AAD` →
+`01:7B87`) sets palette 3 when the enemy's `+$0B iceCounter` is non-zero.
+The second pass keeps it.
+
+So the per-sprite slot changes are exactly two: the OBP1 swap, and frozen
+→ 3. Damage and hit flashes in the original toggle OBP1, so they go through
+the swap.
+
+## Colours and palette effects
+
+EJRTQ ignores the DMG palette registers for colour. It still writes BGP and
+OBP0 (`10:441E`), which have no effect in CGB mode, and it skips the OBP1
+write (`00:0163` → `0172`). Every effect is a change to the colours instead:
+
+- **Storage:** `10:4118` copies the colour block to `$D180` (the master) at
+  boot. `10:458A` builds the working copy at `$D100` from it.
+  `$D100` interleaves BG and OBJ: 2 bytes BG, then 2 bytes OBJ.
+  `10:45C5` uploads the copy to BCPD and OCPD (`$FF69`, `$FF6B`) in vblank
+  when `$D44A` is set.
+- **Fades:** `00:2577` replaces the original's BGP-from-`$D066` lookup with a
+  fade level, `$D44B = ($2F − [$D066]) / 4`. `10:426C` sets BGP/OBP0 from a
+  table, so the original's logic still sees the DMG values. `10:458A`
+  darkens every colour by the level: right shifts of each RGB component by
+  1, 2 or 3, then black, with the odd levels blended between (`10:44F1-4589`).
+- **Pause:** game mode `$08` with BGP not `$93` uses fade level 2
+  (`10:437A`).
+- **Credits:** game mode `$12` takes the level from `$D066` (`10:4385`).
+- **Title flash:** game mode `$01` with BGP not `$93` selects mode `$82`
+  (`10:436F`). `10:45E4` writes white to colour 0 of every palette.
+- **Queen body flash:** in the Queen's room (`$D08B = $11`), when
+  `queen_bodyPalette` (`$C3D2`) is 3, mode `$83` (`10:4364`, `4611`) rewrites
+  colours 1-3 of three palettes from other entries of `$D100`.
+- **The Queen's colours:** door scripts `$19D`, `$19E` and `$19F` (each ends
+  in `enter_queen`) now jump through `if_met_less $99` to new scripts
+  `$1F1-$1F3` (`05:7F48`, `7F5A`, `7F66`). Each runs command `$E0` to load
+  16 bytes of colour from `10:4108` to `$D1C0`: BG and OBJ palette 4 for the
+  Queen fight. Then it runs the original commands.
+
+Colour 0 is black in every BG palette of the colour block.
+
+## The extraction (`zig build ejrtq`)
+
+`src/ejrtq.zig` reads the model above off the patched ROM, built in memory,
+and writes `src/full_assign.zig`. `zig build ejrtq -- check` diffs the
+committed file against a fresh extraction. What it found:
+
+- **Every slot is explained.** 2,971 source tiles in 47 regions. One other
+  non-zero shadow byte, `27:7BC0 = 1`, belongs to a tile in bank 7's free
+  space (`07:7B90` on), which is zeros in both ROMs and which nothing points
+  at. It is allow-listed with that reason; any other stray fails.
+- **The rules** read off the code: OBP1 turns slot 3 into 1 and any other
+  slot into 3 (both passes agree); a frozen enemy gets slot 3.
+- **The status bar's glyphs are the power suit's.** They are tiles `$9D-$AF`
+  of Samus's sheet. The Varia load (`gfxInfo_variaSuit`) copies only `$7B0`
+  bytes, tiles `$00-$7A`, so it never replaces them. (EJRTQ's Varia slots past
+  `$7A` are all 0, which agrees: those tiles never reach VRAM.)
+- **Tile-id edits.** `hudBaseTilemap` and the Queen room's status bar (map F
+  screen `$FE`'s bottom row, through new metatiles `$28-$2E`) get the same
+  edit: blank `$AF` becomes `$A9` (the digit 9) in the digit fields, which the
+  status bar overwrites every frame, and `$9D` (an empty energy tank) at the
+  tank columns. So `$AF` derives two slots, 3 and 7. The hand choice is 3,
+  `$AF`'s own slot. Every other edited id keeps its own slot.
+- **Look-alikes.** No two of EJRTQ's palettes are identical, in either layer.
+  One pair of pixel-identical tiles sits in different slots:
+  `gfx_plantBubbles` `$1B` (slot 0) and `$60` (slot 4), which EJRTQ draws in
+  different colours. So no look-alike class is committed. That pair gets an
+  eye check when the colours are chosen.
+
+## What the port takes, and what it doesn't
+
+**Taken (as committed data, F2):** each source tile's slot (banks `$25-$28`),
+the OBP1 swap, the frozen rule, and which slots EJRTQ makes look alike.
+
+**Not taken:**
+- **Colours:** the colour block, the Queen override and every effect's
+  colour values.
+- **Art edits:** 252 tiles in banks `$05-$08`. 59 only remap shades (a
+  consistent swap of the four shades): Samus's Power Suit 19, Varia 2, the
+  title 2, credits fonts and sprites 21, enemies 11, Gamma 4. 193 are
+  redrawn: credits sprites 77, Metroids 35, enemies and Arachnus 24,
+  tilesets 25, the title 13, Samus 10, items 9. The port draws the original
+  art. Where a tile's slot was chosen for EJRTQ's redrawn pixels, our
+  colours land on the original pixels instead.
+- **Tile-id edits:** `hudBaseTilemap` (`05:40F0-4103`) and the Queen area's
+  screens and metatiles (`0F:50F0-50F9`, `08:4F22-4F3B`). There EJRTQ shows
+  tile ids the original doesn't use, so those positions' slots can't be
+  read from the table through original ids.
+
+## In the cart
+
+- **Key → cart state.** There is no area or tileset key. The cart already
+  copies graphics to Game Boy VRAM addresses (`LoadGraphics` and its
+  `GfxInfo` rows, the title and credits loaders, the door loads, and the
+  `hVramTransfer` queue drained by `GfxXferNmi`). Each copy also writes the
+  slots of its source tiles into a 384-entry WRAM table indexed by Game Boy
+  VRAM tile, mirroring `$D200-$D37F`. The committed data is one slot per
+  source tile.
+- **Tilemap writers** look up the tile's slot through the same signed or
+  unsigned addressing as `10:4175`/`418C`, and OR it into the SNES map word.
+- **Capacity.** BG uses slots 0-7: at least one tileset (`gfx_ruinsExt`)
+  uses all eight. The window shares the table, so it needs no extra slots.
+  But the HUD's 4bpp palette 1 (CGRAM `$10-$1F`) overlaps BG3 palettes 4-7,
+  so it has to move. Sprites use slots 0-7, which map to SNES OBJ palettes
+  0-7 (CGRAM `$80-$FF`).
+
+## Decisions
+
+- **Art:** the port keeps the original art. Samus, the Metroids and the
+  credits get an eye check when colours are chosen.
+- **Tile-id edits:** for the HUD and the Queen area, the oracle derives a
+  slot per original tile id and reports any id that gets more than one.
+  Hand-picked overrides are committed with the assignment data.
+- **Fades and flashes:** the port keeps the original's DMG-register effects,
+  remapping the four shades within each slot as `gbc` does. It does not
+  take EJRTQ's colour darkening. So colour 3 is each slot's darkest colour,
+  and a data test checks it.
+- **The Queen's room** is its own colour area, in place of EJRTQ's
+  door-script override of palette 4.

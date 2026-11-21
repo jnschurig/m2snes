@@ -491,6 +491,23 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // The EJRTQ oracle's extraction (colorization Step 3): IPS apply, and the
+    // static read of EJRTQ's slots into `src/full_assign.zig`. `gb_trace.zig`
+    // (for its zip reader) brings the emulator's imports with it.
+    const ips_mod = b.createModule(.{
+        .root_source_file = b.path("src/ips.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const ejrtq_mod = b.createModule(.{
+        .root_source_file = b.path("src/ejrtq.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ejrtq_mod.addOptions("build_options", options);
+    ejrtq_mod.addImport("testrom", testrom_mod);
+    ejrtq_mod.addImport("png", png_mod);
+
     // The bytes that go at those addresses: the image the cart uploads at boot,
     // and the one `spcrun` runs offline when `audiocmp` grades the engine.
     const aram_image_mod = b.createModule(.{
@@ -803,7 +820,7 @@ pub fn build(b: *std.Build) void {
         run.has_side_effects = true;
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod }) |mod| {
+    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod, ips_mod, ejrtq_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const run = b.addRunArtifact(t);
         run.step.dependOn(&crawl_run.step);
@@ -953,6 +970,23 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| disasm_run.addArgs(args);
     b.step("disasm", "Disassemble a region of the ROM: [bank] [start] [end] [entry...]")
         .dependOn(&disasm_run.step);
+
+    // ---- The EJRTQ oracle (colorization Step 3) ----------------------------
+    // By hand only: it needs EJRTQ's patch in reference/, which no gate has.
+    const ejrtq_mod_exe = b.createModule(.{
+        .root_source_file = b.path("src/ejrtq_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ejrtq_mod_exe.addOptions("build_options", options);
+    ejrtq_mod_exe.addImport("testrom", testrom_mod);
+    ejrtq_mod_exe.addImport("png", png_mod);
+    const ejrtq_run = b.addRunArtifact(b.addExecutable(.{ .name = "ejrtq", .root_module = ejrtq_mod_exe }));
+    ejrtq_run.setCwd(b.path("."));
+    ejrtq_run.has_side_effects = true;
+    if (b.args) |args| ejrtq_run.addArgs(args);
+    b.step("ejrtq", "Extract EJRTQ's palette slots into src/full_assign.zig, or `-- check` it (needs reference/Metroid_II_EJRTQ_Colorization_v1.3.zip)")
+        .dependOn(&ejrtq_run.step);
 
     // ---- Logic ledger ------------------------------------------------------
     // ReleaseFast: it emulates minutes of the game and disassembles six banks
