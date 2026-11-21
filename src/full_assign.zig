@@ -16,8 +16,11 @@ const std = @import("std");
 pub const Layer = enum { bg, obj };
 
 /// A graphics region of `offsets.zig`, and one slot digit per 16-byte tile,
-/// in ROM order. Sprites and the background share them.
-pub const Region = struct { name: []const u8, slots: []const u8 };
+/// in ROM order. Sprites and the background share them. `seen` is what
+/// the recording showed of each tile (`zig build ejrtq -- cover`): `.`
+/// never, so its slot is unobserved; `b` on the background or window
+/// only; `s` as a sprite only; `+` both. Empty: coverage not run.
+pub const Region = struct { name: []const u8, slots: []const u8, seen: []const u8 = "" };
 
 /// An OBJ entry with the DMG OBP1 bit: slot `when` becomes `then`, any
 /// other slot becomes `otherwise`.
@@ -70,18 +73,24 @@ pub const regions = [_]Region{
         .slots = "3333333333333333333333333333333333333333333333333333333333333333" ++
             "3333333777733333333333333333377777777777777774422333333333333307" ++
             "11111111111111171111111111111117",
+        .seen = "bbbbbbbbbbbbbbbbbbb+bbbbbbb+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbb+b++b++++b++bbbbbbbbbbbbbbsss.sssss.....s...b" ++
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
     .{
         .name = "gfx_creditsFont",
         .slots = "777777777777777777777777773333772222222233333333",
+        .seen = "bbbbbbbbbbbbbbbb.bbbb.b.bb...bbbbbbbbbbb..bbbbbb",
     },
     .{
         .name = "gfx_itemFont",
         .slots = "77777777777777777777777777777777",
+        .seen = "+b+++.bbbbb++.++.+++bbb..b....bb",
     },
     .{
         .name = "gfx_creditsNumbers",
         .slots = "7777777777700005",
+        .seen = "s.s...s...bss..b",
     },
     .{
         .name = "gfx_creditsSprTiles",
@@ -89,189 +98,250 @@ pub const regions = [_]Region{
             "5555655550000555555557555555555556555565555655555555555555555566" ++
             "5555565555555550222222222222222222222222222222222222222222222222" ++
             "222222222222222222222222222222222222222222222233",
+        .seen = "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss" ++
+            "sssssssssssssssss..ssssssssssssssssssssssssssssssss............." ++
+            "................ssssssssssssssssssssssssssssssssssssssssssssssss" ++
+            "sssssssssssssssssss.ssssssssssssssssssssssssssss",
     },
     .{
         .name = "gfx_theEnd",
         .slots = "3333333333333300",
+        .seen = "bbbbbbbbbbbbbb..",
     },
     .{
         .name = "gfx_cannonBeam",
         .slots = "66",
+        .seen = "ss",
     },
     .{
         .name = "gfx_cannonMissile",
         .slots = "66",
+        .seen = "ss",
     },
     .{
         .name = "gfx_beamIce",
         .slots = "33",
+        .seen = "ss",
     },
     .{
         .name = "gfx_beamWave",
         .slots = "11",
+        .seen = "ss",
     },
     .{
         .name = "gfx_beamSpazerPlasma",
         .slots = "55",
+        .seen = "ss",
     },
     .{
         .name = "gfx_spinSpaceTop",
         .slots = "5555755",
+        .seen = "sssssss",
     },
     .{
         .name = "gfx_spinSpaceBottom",
         .slots = "55755",
+        .seen = "sssss",
     },
     .{
         .name = "gfx_spinScrewTop",
         .slots = "5555555",
+        .seen = ".......",
     },
     .{
         .name = "gfx_spinScrewBottom",
         .slots = "55555",
+        .seen = ".....",
     },
     .{
         .name = "gfx_spinSpaceScrewTop",
         .slots = "4443333",
+        .seen = "sssssss",
     },
     .{
         .name = "gfx_spinSpaceScrewBottom",
         .slots = "44433",
+        .seen = "sssss",
     },
     .{
         .name = "gfx_springBallTop",
         .slots = "44",
+        .seen = "ss",
     },
     .{
         .name = "gfx_springBallBottom",
         .slots = "44",
+        .seen = "ss",
     },
     .{
         .name = "gfx_samusPowerSuit",
         .slots = "5755745466575553555555556555555565555555545555556554555555556555" ++
             "5555555555555555555575555555555555755555555555555555555555544444" ++
             "444454444344444444111133330033737777777777333333",
+        .seen = "sssssssssssssss.ssssssssssssssssssssssssssssssssssssss.sssssssss" ++
+            "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss" ++
+            "sssssssssssssss.ssssssssssssbbbbbbbbbbbbbbbssssb",
     },
     .{
         .name = "gfx_samusVariaSuit",
         .slots = "5755745466575553555555555555555565555555545555556554555555556555" ++
             "5555555555555555555575555555555555755555555555555555555555500000" ++
             "000000000000000000000000000000000000000000000000",
+        .seen = "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss" ++
+            "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssss....." ++
+            "................................................",
     },
     .{
         .name = "gfx_enemiesA",
         .slots = "4455557557555757555555555555555555541111111000000066666666644545",
+        .seen = "ssssssssssssssssssssssssssssssssssssssssssssss....ss+sssssssssss",
     },
     .{
         .name = "gfx_enemiesB",
         .slots = "5555606640060000004444444440666406606006066661111111456666000054",
+        .seen = "ssssssssss..ssssssssssssssssssssssssssssssssssssssssssssssssss.s",
     },
     .{
         .name = "gfx_enemiesC",
         .slots = "4444516666666655545545554533333333000005555555555555544454453333",
+        .seen = "sssss.ssssssssssssssssssssssssssssssssssssssssssssssssssssss....",
     },
     .{
         .name = "gfx_enemiesD",
         .slots = "3311755555533333333334036616161611331113333333333554533330000111",
+        .seen = "sssssssssssssssssssssss.ssssssss...s....sssssss.ssssssss........",
     },
     .{
         .name = "gfx_enemiesE",
         .slots = "3344345335532335455333444445535540455441344444444006605065006006",
+        .seen = "sssssssssssssssssssssss..sssss.....sssssssssssssssssssssssssssss",
     },
     .{
         .name = "gfx_enemiesF",
         .slots = "3300554445555445445455455555050040444444444444400044444444444440",
+        .seen = "ssssssssssssssssssssssssssssssssssssssssssssss......ssssssssss..",
     },
     .{
         .name = "gfx_arachnus",
         .slots = "4444555544554455545557555445555777500000000000000000000000000000",
+        .seen = "sssssssssssssssssssssssssssssssssss.............................",
     },
     .{
         .name = "gfx_surfaceSPR",
         .slots = "0000666666777736444444444444444444444444444444447407664444444444",
+        .seen = "ssssssssssbbbbb.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb+b",
     },
     .{
         .name = "gfx_plantBubbles",
         .slots = "4444000022223377727022272740666600662266660000000000000026625555" ++
             "0066667722222222000000005555555546666666666666266666666666667270",
+        .seen = "bbbbbbbbbbbbbbbbbbbbbbbbbbb.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbb....bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
     .{
         .name = "gfx_ruinsInside",
         .slots = "7777222200003377444447744774477444444444444444441111000033333333" ++
             "2222000000224444777714146666662244777777773300006666666633404007",
+        .seen = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
     .{
         .name = "gfx_queenBG",
         .slots = "2222226666666622222666666662262266622666226666226622226622262222" ++
             "2226225522222262222226600007677700000000000000000000000000000000",
+        .seen = "bbbbbbbbbbb...bbbbbbbbbbbbbbbb.bbbbbbbbbbbb.bbbbbbbbbbbbbbbbbbb." ++
+            "bbbbbbbbbbbbbb.bbbbbbbbbbbbb.bb............b........b..........b",
     },
     .{
         .name = "gfx_caveFirst",
         .slots = "4444000022222222337777007441333300007777722222222222000000000000" ++
             "0000222222220000777777770027266666600003772266722222666666662002",
+        .seen = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbb..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..bbbbbbbb",
     },
     .{
         .name = "gfx_surfaceBG",
         .slots = "2222222222202222444444444444444444444444444444444444027772002777" ++
             "2000777777002222222222222666006066666000000620024444444444444444",
+        .seen = "............bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb....bbbbb...bbbbbbbbbbbbbbbbbbbb",
     },
     .{
         .name = "gfx_lavaCavesA",
         .slots = "0000000000007777655666665555555514105555414155550500445555757577" ++
             "7766555757566665555",
+        .seen = "bb.b........bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.bbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbb...",
     },
     .{
         .name = "gfx_lavaCavesB",
         .slots = "3333777722227777655666665555555577775555222255552500005555757527" ++
             "7766555757566665555",
+        .seen = ".....b.bbb..b...bbbbbbbbbbbb....bbbbbbbbbbbbbbbbbbbbbbbb..b.bbbb" ++
+            "bbbb..bb.b.bbbb....",
     },
     .{
         .name = "gfx_lavaCavesC",
         .slots = "4444444400004444655666665555555566665555222255550541225555757527" ++
             "7766555757566665555",
+        .seen = ".................bb......bb.....bbbbbbbbbbbbbbbbbbbbbb......bbbb" ++
+            "bb....b..bb........",
     },
     .{
         .name = "gfx_items",
         .slots = "15116366414454555555555577775555333344445555",
+        .seen = "ssssssssssssssssssssssssssssssssssssssss....",
     },
     .{
         .name = "gfx_itemOrb",
         .slots = "4444",
+        .seen = "ssss",
     },
     .{
         .name = "gfx_commonItems",
         .slots = "3333555444433100",
+        .seen = "ssssssssssssss.+",
     },
     .{
         .name = "gfx_metAlpha",
         .slots = "4000000644444406444005560004440400004444444405545500044000000004",
+        .seen = "ssssssssss....ssssssssssssss...sssssssssssssssss....ssssssssssss",
     },
     .{
         .name = "gfx_metGamma",
         .slots = "4000444444444444444054444440404440004404444440444444660004444000",
+        .seen = "sssssssss..sssssssss.ssss..sssss.ssssssss..sss........sss..sssss",
     },
     .{
         .name = "gfx_metZeta",
         .slots = "4404444444444400440444444444000064404404400455004044440000445500",
+        .seen = "ssssssssssss.sssssssssssssssssssssssssssssssssssssss.ssssssss.ss",
     },
     .{
         .name = "gfx_metOmega",
         .slots = "4404444444404400440440600606445504454400660605554045440000405555",
+        .seen = "ssssssssssssssssssssssssssssssssssssssssssssssss.sssssssss.sssss",
     },
     .{
         .name = "gfx_ruinsExt",
         .slots = "0000000022223377777777330044444444777707777222231443333377667777" ++
             "2222222266662720220066666641555555550233000066666666666622007777",
+        .seen = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
     .{
         .name = "gfx_finalLab",
         .slots = "2222000000007777222222272222227222722222272227222027222722214414" ++
             "3322003327777777000077777277777277222202276222222222420022223244",
+        .seen = "bbbbbbbbbbbbbbbb......b.....bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ++
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..bbbbbbbbbbbbbbbbbbbb..bbb.bbbb",
     },
     .{
         .name = "gfx_queenSPR",
         .slots = "4666600066666624652260022226202262222212226622226626662224652222" ++
             "5522222622662620",
+        .seen = "+bbbbs..........bbbbbs..........bbbbbb.........b..bbbb...b.....b" ++
+            "ssb.b....b....bb",
     },
 };
 

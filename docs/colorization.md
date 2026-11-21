@@ -173,6 +173,75 @@ committed file against a fresh extraction. What it found:
   different colours. So no look-alike class is committed. That pair gets an
   eye check when the colours are chosen.
 
+## Coverage (`zig build ejrtq -- cover`)
+
+The static read gives every source tile a slot. The coverage pass says which
+of those tiles the game actually shows. It replays James's 100% recording
+(`reference/metroid2-100p-recording/`, 25 `.mmo` parts) on the **original**
+ROM in Mesen, eight parts at a time, through `gb_trace`'s driver and cart-RAM
+channel (`src/ejrtq_cover.zig`).
+
+- **Which source tile is in each VRAM tile.** A write callback on tile data
+  (`$8000-$97FF`) fires on each tile's first byte. The copy loops read the
+  byte from ROM just before writing it: `copyToVram` (00:038A) and
+  `VBlank_vramDataTransfer` (00:2BA3) with `LD A,(HL+)`, and
+  `VBlank_variaAnimation` (00:2BF4) with `LD A,(DE)`. So the source is HL-1,
+  HL or DE in the bank at `$4000`. A candidate counts only if it is the
+  first byte of a graphics tile and holds the value written. Graphics regions
+  are not 16-byte aligned (the title's starts at 05:5F34), so tile starts are
+  matched by exact address.
+- **What is shown**, at the end of every frame: the background under the
+  scroll less the window, the window, and OAM's visible entries (with OBP1).
+- **Parts run in parallel.** A part starts from a savestate, so its initial
+  VRAM came from the previous part: those tiles take the previous part's
+  final sources afterwards. The first part's are matched by content.
+- **Self-checks:** at each part's end, every tracked tile's VRAM bytes equal
+  its source's ROM bytes; each part's start VRAM equals the previous part's
+  end.
+
+What it found (2026-11-21):
+- 28,832 tile copies with a named source, 1,342 without (clears). Stale
+  tracked tiles 0, seam tiles 0. 74 shown tiles had no named source.
+- **467 of 2,971 source tiles are never shown.** They are `.` in
+  `full_assign.zig`'s `seen` strings: their slot is unobserved. The largest
+  gaps are `gfx_queenSPR` (48), `gfx_lavaCavesC` (48), `gfx_samusVariaSuit`
+  (53), `gfx_creditsSprTiles` (32) and `gfx_arachnus` (29). The Screw
+  Attack frames without Space Jump (`gfx_spinScrew*`) never appear; the
+  combined ones do.
+- Samus stood in most of each area's cells, all of areas 4 and 9.
+
+## Validation (`zig build ejrtq -- cgb`)
+
+The static model against the **patched** ROM running in SameBoy as a Game Boy
+Color (`src/sbcgb.c`, graded by `src/ejrtq_cgb.zig`). SameBoy tracks each VRAM
+tile's source tile the same way as the coverage pass. At each state the check
+compares:
+- every visible background and window cell's attribute (VRAM bank 1) with
+  the slot of its tile's source, by LCDC's addressing;
+- every visible sprite's palette with its tile's slot through the OBP1 swap
+  (the frozen slot on a non-Samus entry is counted, not failed);
+- EJRTQ's `$D200-$D37F` table with each tracked VRAM tile's slot.
+
+States: the title, the landing site after a new game, and a boot from the
+recording's first save in each area that has one (saves are kept by the
+coverage pass). Result (2026-11-21): **no mismatch** in the title, the
+landing site, or areas 1, 2, 3, 7, 8 and 10. That's 340-378 background
+cells, 20 window cells, 7-17 sprites and 256-384 table entries per state.
+
+- **Invisible differences, documented.** In every gameplay state, four
+  status-bar cells (window row 0, columns 8, 14, 15, 16) have attribute 7
+  where the model gives `$AF` slot 3 and `$FF` slot 0. These are the digit
+  fields: EJRTQ sets the digits' slot (7) when it draws them, and leaves it
+  when the field is blanked. Its `$AF` is redrawn as colour 0 only (the
+  original's is solid shade 1), and `$FF` is colour 0 only in both ROMs, so
+  in EJRTQ the difference can't be seen. The grader counts a mismatch under a
+  colour-0-only tile as invisible. For the port, which draws the original
+  `$AF`, the status bar's slots are the hand choice (`hud_choices`), and the
+  HUD gets its own palette (colorization F3).
+- **Not checked from a save:** areas 4, 5, 6 and 9, and the Queen's room. The
+  recording saves in none of them. (The surface is the landing site.) The
+  model has no area key, so these states would only add tilesets.
+
 ## What the port takes, and what it doesn't
 
 **Taken (as committed data, F2):** each source tile's slot (banks `$25-$28`),

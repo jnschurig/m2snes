@@ -24,7 +24,8 @@
 //!    EJRTQ's colours agree on the shades those tiles use. Colours are compared
 //!    in memory; none is rendered.
 //!
-//! **Not here:** coverage over the recording and the SameBoy check (Step 5).
+//! Coverage over the recording is `ejrtq_cover.zig`; the check against the
+//! patched ROM in SameBoy is `ejrtq_cgb.zig` (Step 5).
 
 const std = @import("std");
 const offsets = @import("offsets.zig");
@@ -476,7 +477,18 @@ pub const Extraction = struct {
     colours: Colours,
     /// Must be empty for the model to hold.
     stray: []Stray,
+    /// Per region, in `slots` order: the coverage characters, or empty.
+    /// `extract` takes them from the committed file; the coverage pass
+    /// replaces them.
+    seen: []const []const u8 = &.{},
 };
+
+/// The committed file's `seen` string for region `name`, or empty.
+pub fn committedSeen(name: []const u8) []const u8 {
+    if (!@hasField(committed.Region, "seen")) return "";
+    for (committed.regions) |r| if (std.mem.eql(u8, r.name, name)) return r.seen;
+    return "";
+}
 
 pub fn extract(allocator: std.mem.Allocator, rom: []const u8, patched: []const u8) !Extraction {
     var stray: std.ArrayList(Stray) = .empty;
@@ -487,7 +499,14 @@ pub fn extract(allocator: std.mem.Allocator, rom: []const u8, patched: []const u
     };
     var screens: std.ArrayList(u8) = .empty;
     const cols = colours(patched);
+    const seen = try allocator.alloc([]const u8, slots.len);
+    for (seen, slots) |*s, r| {
+        s.* = committedSeen(r.name);
+        // A region that changed size since coverage ran has none.
+        if (s.len != r.slots.len) s.* = "";
+    }
     return .{
+        .seen = seen,
         .slots = slots,
         .obp1 = try obp1Swap(patched),
         .frozen = try frozenSlot(patched),
@@ -538,8 +557,11 @@ const preamble =
     \\pub const Layer = enum { bg, obj };
     \\
     \\/// A graphics region of `offsets.zig`, and one slot digit per 16-byte tile,
-    \\/// in ROM order. Sprites and the background share them.
-    \\pub const Region = struct { name: []const u8, slots: []const u8 };
+    \\/// in ROM order. Sprites and the background share them. `seen` is what
+    \\/// the recording showed of each tile (`zig build ejrtq -- cover`): `.`
+    \\/// never, so its slot is unobserved; `b` on the background or window
+    \\/// only; `s` as a sprite only; `+` both. Empty: coverage not run.
+    \\pub const Region = struct { name: []const u8, slots: []const u8, seen: []const u8 = "" };
     \\
     \\/// An OBJ entry with the DMG OBP1 bit: slot `when` becomes `then`, any
     \\/// other slot becomes `otherwise`.
@@ -597,15 +619,13 @@ pub fn render(allocator: std.mem.Allocator, x: Extraction, hand: []const u8) ![]
     try w.writeAll(preamble);
 
     try w.writeAll("\npub const regions = [_]Region{\n");
-    for (x.slots) |r| {
+    for (x.slots, 0..) |r, k| {
         try w.print("    .{{\n        .name = \"{s}\",\n        .slots = ", .{r.name});
-        for (r.slots, 0..) |s, i| {
-            if (i % digits_per_line == 0) {
-                if (i != 0) try w.writeAll(" ++\n            ");
-                try w.writeByte('"');
-            }
-            try w.writeByte('0' + @as(u8, s));
-            if (i % digits_per_line == digits_per_line - 1 or i == r.slots.len - 1) try w.writeByte('"');
+        for (r.slots, 0..) |s, i| try wrapped(w, i, r.slots.len, '0' + @as(u8, s));
+        const seen = if (k < x.seen.len) x.seen[k] else "";
+        if (seen.len != 0) {
+            try w.writeAll(",\n        .seen = ");
+            for (seen, 0..) |c, i| try wrapped(w, i, seen.len, c);
         }
         try w.writeAll(",\n    },\n");
     }
@@ -638,6 +658,17 @@ pub fn render(allocator: std.mem.Allocator, x: Extraction, hand: []const u8) ![]
 
     try w.writeAll(hand);
     return zigFmt(allocator, buf.written());
+}
+
+/// Character `i` of a `len`-character string literal, broken into
+/// `digits_per_line` pieces joined with `++`.
+fn wrapped(w: *std.Io.Writer, i: usize, len: usize, c: u8) !void {
+    if (i % digits_per_line == 0) {
+        if (i != 0) try w.writeAll(" ++\n            ");
+        try w.writeByte('"');
+    }
+    try w.writeByte(c);
+    if (i % digits_per_line == digits_per_line - 1 or i == len - 1) try w.writeByte('"');
 }
 
 /// `text` as `zig fmt` leaves it, so the committed file is formatted however
@@ -834,10 +865,11 @@ test "the rendered file round-trips slot digits and keeps the hand section" {
         .look = .{ .keep = &.{}, .differ = &.{}, .pairs = &.{} },
         .colours = undefined,
         .stray = &.{},
+        .seen = &.{"b.+"},
     };
     const text = try render(testing.allocator, x, default_hand);
     defer testing.allocator.free(text);
-    try testing.expect(std.mem.indexOf(u8, text, ".name = \"gfx_x\",\n        .slots = \"073\",") != null);
+    try testing.expect(std.mem.indexOf(u8, text, ".name = \"gfx_x\",\n        .slots = \"073\",\n        .seen = \"b.+\",") != null);
     try testing.expect(std.mem.endsWith(u8, text, default_hand));
     try testing.expectEqualStrings(default_hand, handSection(text));
 }

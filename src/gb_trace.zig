@@ -490,7 +490,7 @@ pub const magic = [4]u8{ 'G', 'B', 'T', '1' };
 
 /// Emit `bytes` as a Lua string literal, in pieces small enough not to lean on
 /// the parser, concatenated with `table.concat`.
-fn writeLuaBytes(w: *std.Io.Writer, bytes: []const u8) !void {
+pub fn writeLuaBytes(w: *std.Io.Writer, bytes: []const u8) !void {
     try w.print("table.concat{{\n", .{});
     var at: usize = 0;
     while (at < bytes.len) : (at += 1024) {
@@ -624,7 +624,7 @@ pub fn writeLua(
 /// Shared because the world pass and the row pass differ only in what they
 /// record. Every trap in here was paid for once and there is no second copy to
 /// pay for it again.
-fn writeDriver(w: *std.Io.Writer, offset: usize) !void {
+pub fn writeDriver(w: *std.Io.Writer, offset: usize) !void {
     try w.print(
         \\local OFFSET = {d}
         \\
@@ -2083,7 +2083,7 @@ pub const cache_dir = out_dir ++ "/mesen-cache";
 /// `spawnPass` in a lane of its own. Passes run side by side each need their
 /// own file names: Mesen names the save file after the cart, and the save file
 /// is how a pass reports. `lane` null is the one-at-a-time name, `stem`.
-fn spawnPassIn(
+pub fn spawnPassIn(
     allocator: std.mem.Allocator,
     io: std.Io,
     rom: []const u8,
