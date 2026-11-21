@@ -7,6 +7,7 @@ updated:
   - 2026-11-21T05:24:48Z
   - 2026-11-21T06:18:43Z
   - 2026-11-21T19:21:16Z
+  - 2026-11-21T19:37:57Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -93,11 +94,11 @@ two other ways:
   - [x] Write the findings into `docs/colorization.md` (addresses and
         mechanism only, no colour values). Every claim cites an address.
 
-- [x] **Step 3: The EJRTQ oracle — extraction (`zig build ejrtq`)**
+- [x] **Step 3: The EJRTQ oracle — extraction (`zig build full-assign`)**
   - [x] `src/ips.zig`: IPS apply (including RLE records) and the pinned SHA-1
         check. Make `gb_trace.zipEntry` `pub` and read the zip with it. Unit
         tests on a hand-built IPS.
-  - [x] `src/ejrtq.zig`: statically read the slot of every source tile in
+  - [x] `src/full_ref.zig`: statically read the slot of every source tile in
         the graphics regions of banks 5-8 (`offsets.zig`'s `graphics_*`),
         from the tile's first byte in bank `$20+N`. Compute the look-alike
         classes by comparing EJRTQ's colours in memory only.
@@ -112,7 +113,7 @@ two other ways:
         entries need the recording's coverage: moved to Step 5.)
   - [x] A unit test fails if the generated text contains any 16-bit value
         from EJRTQ's colour block (the oracle checks its own output).
-  - [x] Verify: `zig build ejrtq` writes the file, `zig build ejrtq --
+  - [x] Verify: `zig build full-assign` writes the file, `zig build full-assign --
         check` passes, and `zig build test` is green. `src/policy.zig` passes
         on the new file.
   - [x] Commit: "full: EJRTQ extraction and assignment tables".
@@ -158,21 +159,29 @@ two other ways:
         nest bit and the Queen's room doesn't.
   - [x] Commit: "full: acid and nest colour sets".
 
-- [ ] **Step 5: The EJRTQ oracle — validation and coverage**
-  - [ ] Mesen pass over `reference/metroid2-100p-recording/` on the original
+- [x] **Step 5: The EJRTQ oracle — validation and coverage**
+  - [x] Mesen pass over `reference/metroid2-100p-recording/` on the original
         ROM (reusing `gb_trace`'s Lua driver and cart-RAM channel). Per
         frame, record which source tiles are in VRAM and visible (BG tile ids
         through the copies that loaded them, OAM tile ids plus OBP1 bits).
         Report the source tiles that are never seen, and mark them in
         `full_assign.zig` as unobserved (from Step 3: the static read gives
         every tile a slot, so only coverage can say which went unseen).
-  - [ ] SameBoy CGB on the patched ROM, reusing `gbc_oracle_run`/`sbref.c`:
+        (Done as `zig build full-assign -- cover`: per-frame marks accumulated per
+        part, parts in parallel and chained afterwards; `seen` strings in
+        `full_assign.zig`. 467 of 2,971 tiles never shown.)
+  - [x] SameBoy CGB on the patched ROM, reusing `gbc_oracle_run`/`sbref.c`:
         boot to the title and the landing site, then boot from a save file in
         each area from Step 4 (the save records `save.zig` writes). Compare
         VRAM bank 1 and OAM palettes with the static model at each state.
-  - [ ] Verify: zero mismatches. Any mismatch either revises the model
+        (`zig build full-assign -- cgb`, `src/sbcgb.c`. Saves come from the
+        recording; it saves in areas 1-3, 7, 8, 10 only. Areas 4, 5, 6, 9
+        and the Queen are not checked from a save: listed in the doc.)
+  - [x] Verify: zero mismatches. Any mismatch either revises the model
         (Step 2) or is listed in `docs/colorization.md` with its cause.
-  - [ ] Commit: "full: EJRTQ oracle validation and coverage".
+        (Zero visible mismatches. Four status-bar cells per gameplay state
+        differ under colour-0-only tiles; cause in the doc.)
+  - [x] Commit: "full: EJRTQ oracle validation and coverage".
 
 - [ ] **Step 6: Per-tile BG and window palettes in the engine**
   - [ ] WRAM: a 384-byte slot table per Game Boy VRAM tile (`$8000-$97FF`).
