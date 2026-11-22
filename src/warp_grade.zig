@@ -997,8 +997,10 @@ pub fn writeRunner(w: *std.Io.Writer) !void {
         \\  if phase == 1 then
         \\    local fc = rd16(R.frames)
         \\    local p = {{}}
-        \\    -- Colour schemes Step 6: L before Start, for a script that sets it.
-        \\    if TITLE_L and fc + 1 == 2 then p.l = true end
+        \\    -- Colour schemes Step 6: L before Start, for a script that sets it;
+        \\    -- twice since colorization Step 8, `gbc` to `full` to `mono`, with a
+        \\    -- poll let go between, so each is an edge.
+        \\    if TITLE_L and (fc + 1 == 2 or fc + 1 == 4) then p.l = true end
         \\    if fc + 1 == 5 or fc + 1 == 6 then
         \\      p.start = true
         \\      starts = starts + 1

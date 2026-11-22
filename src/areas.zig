@@ -581,6 +581,20 @@ pub fn lookOf(byte: u8, lava_loaded: bool) Look {
     return .{ .area = area };
 }
 
+/// How many colour sets `full` carries: one per area, a `nest` variant of
+/// each but the Queen's, and `acid`.
+pub const set_count: usize = Area.count + (Area.count - 1) + 1;
+
+/// A look's colour set, the index into `colors.full`'s per-set tables and the
+/// cart's: the areas in id order, then their `nest` variants, then `acid`.
+pub fn setOf(look: Look) u8 {
+    return switch (look) {
+        .area => |a| @intFromEnum(a),
+        .nest => |a| @as(u8, Area.count) + @intFromEnum(a),
+        .acid => @intCast(set_count - 1),
+    };
+}
+
 // ---- Tests ------------------------------------------------------------------
 
 const testing = std.testing;
@@ -673,6 +687,23 @@ test "the colour set: queen over nest over acid over area" {
     try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, false));
     try testing.expectEqual(Look.acid, lookOf(a3, true));
     try testing.expectEqual(Look{ .area = .area3 }, lookOf(a3, false));
+}
+
+test "every look the cart can reach has its own colour set" {
+    var seen = [_]bool{false} ** set_count;
+    for (0..Area.count) |ai| for ([_]bool{ false, true }) |nest| for ([_]bool{ false, true }) |lava| {
+        const byte: u8 = @as(u8, @intCast(ai)) | (if (nest and ai != @intFromEnum(Area.queen)) nest_bit else 0);
+        const look = lookOf(byte, lava);
+        const set = setOf(look);
+        try testing.expect(set < set_count);
+        seen[set] = true;
+        // Two looks never share a set.
+        for (0..Area.count) |bi| for ([_]bool{ false, true }) |nb| for ([_]bool{ false, true }) |lb| {
+            const other = lookOf(@as(u8, @intCast(bi)) | (if (nb and bi != @intFromEnum(Area.queen)) nest_bit else 0), lb);
+            if (setOf(other) == set) try testing.expectEqual(look, other);
+        };
+    };
+    for (seen) |v| try testing.expect(v);
 }
 
 test "a Metroid marks its whole room as a nest, and never the Queen's" {

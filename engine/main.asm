@@ -167,10 +167,32 @@ arch 65816
 ; and every boot that skips the title get (`colors.default_scheme`), and the
 ; CGRAM words each one is (`colors.cgramWords`). An id is what SRAM stores, so
 ; it never changes meaning.
-!SCHEMES        = 2
+!SCHEMES        = 3
 !DEFAULT_SCHEME = 1             ; `gbc`
 !SCHEME_WORDS   = 16
 assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
+; Colorization Step 8: `full`, id 2, and `FullTable` (`colors.fullTable`):
+; `!FULL_SETS` colour sets (`areas.setOf`) of BG3's 8 palettes of 4 words, then
+; the window's `!WIN_PALS`, the objects' 8 and the 3 Metroid damage steps.
+; Asar's arithmetic runs left to right, so every product is in parentheses.
+!SCHEME_FULL    = 2
+!FULL_SETS      = 24
+!FULL_SET_BYTES = 64            ; 8 palettes of 4 words
+!FULL_WIN_AT    = (!FULL_SETS*!FULL_SET_BYTES)
+!FULL_OBJ_AT    = (!FULL_WIN_AT+(!WIN_PALS*8))
+!FULL_DMG_AT    = (!FULL_OBJ_AT+(8*8))
+!FULL_WORDS     = ((!FULL_DMG_AT+(3*8))/2)
+; The per-cell area byte (`areas.Table`), after a map bank's cells in its
+; `map_cells` blob (`snes_convert.area_offset`): the area, `!NEST_BIT` on a
+; Metroid's room. The sets: the areas in id order, then their nest variants,
+; then acid.
+!AREA_AT        = 256*4
+!AREA_COUNT     = 12
+!AREA_QUEEN     = 11
+!NEST_BIT       = $80
+!SET_ACID       = (!FULL_SETS-1)
+!SET_SURFACE    = 0
+!OBJ_DAMAGE_PAL = 2             ; `full_slots.metroid_damage_palette`
 !BG12_CHAR_BASE = $1000
 ; BG34NBA: BG3 characters at word $0000.
 !BG34NBA_VALUE = $00
@@ -3384,6 +3406,7 @@ assert !QueenFeet+!QUEEN_FEET_LEN <= !QueenRowDue
 !DEBUG_CHAR_VRAM = $2400
 !DEBUG_FONT_VRAM = $2410
 !DEBUG_HEX_VRAM  = $2610
+!DEBUG_HEX_BYTES = 544         ; 17 glyphs of 32: `DebugHexFontPtr`'s, `ReadoutFont`'s size
 !DEBUG_CURSOR_VRAM = $2720
 !DEBUG_MAP_VRAM  = $2800
 !DEBUG_MAP_BYTES = 28*64
@@ -3609,6 +3632,10 @@ ConstCollBlobs = !COLL_BLOBS
 !ObjPage      = $07B5           ; `PutObject`'s page of `PutAttr`: 0 mono/gbc, 1 full; an enemy's 2 hit Metroid, 3 frozen
 !MetStepAcc   = $07B6           ; the worst Metroid damage step `DrawEnemies` has drawn so far this pass
 !MetStep      = $07B7           ; and at its end: what OBJ palette 2 shows in `full` (Step 8)
+!FullSet      = $07B8           ; colorization Step 8: the colour set BG3's CGRAM holds
+!FullObj2     = $07B9           ; and the damage step OBJ palette 2 holds
+!FullWant     = $07C5           ; the set `FullFrame` wants, for `SchemeNmi`
+!FullStep     = $07C7           ; the step `FullFrame` wants in OBJ palette 2
 !SlBlob       = $07BA           ; 5: `!Blob` and `!BlobLen`, kept across `SlotFill`
 !TmUsed       = $07BF           ; 2: bytes of `!TmStage` the queued copies hold
 !MetMax       = $07C1           ; 2: `EnemyObjPage`'s full health
@@ -4068,7 +4095,18 @@ ConstDefaultScheme = !DEFAULT_SCHEME
 ConstSchemeWords = !SCHEME_WORDS
 ConstSramScheme  = !SRAM_SCHEME&$FFFF
 ConstSchemeMagicLen = !SCHEME_MAGIC_LEN
+ConstFullWords   = !FULL_WORDS
+ConstDebugHexBytes = !DEBUG_HEX_BYTES
+ConstFullSets    = !FULL_SETS
+ConstSchemeFull  = !SCHEME_FULL
+ConstAreaAt      = !AREA_AT
+ConstAreaCount   = !AREA_COUNT
+ConstAreaQueen   = !AREA_QUEEN
+ConstNestBit     = !NEST_BIT
+ConstObjDamagePal = !OBJ_DAMAGE_PAL
 VarScheme        = !Scheme
+VarFullSet       = !FullSet
+VarFullObj2      = !FullObj2
 VarScreenPri     = !ScreenPri
 
 VarItemStage     = !ItemStage
@@ -5802,6 +5840,13 @@ TitleScreen:
         sep #$20
         lda.b #$0F
         sta !INIDISP            ; blank off, full brightness
+        ; A vblank that began before here latched its flag, and NMI on would
+        ; take it at once, mid-vblank: the counter ticks with too little of the
+        ; vblank left for the title's first frame to be drawn by its end. The
+        ; setup's length decides which side of line 225 it ends on (colorization
+        ; Step 8's badge moved it to 226), so the flag goes, and the first frame
+        ; is always a whole vblank's.
+        lda !RDNMI
         lda.b #$81
         sta !NMITIMEN           ; NMI on, auto-joypad on: this is the only place
         cli                     ; in `Reset` that needs a frame to happen
@@ -21380,7 +21425,9 @@ DrawEnemies:
         lda.w !Scheme           ; and the page every other object reads
         lsr a
         sta.w !ObjPage
-        rep #$30
+        beq +                   ; colorization Step 8: in `full` alone, so the
+        jsl FullFrame           ;   others pay a branch (the Queen's room has no
++       rep #$30                ;   frame to spare), the colour set, bank 1
         rts
 
 ; ---------------------------------------------------------------------------
@@ -25737,7 +25784,9 @@ SchemeStore:
         plp
         rtl
 
-; NMI owes CGRAM the scheme in `!Scheme`. Any widths; keeps them.
+; NMI owes CGRAM the scheme in `!Scheme`. Any widths; keeps them. (Bits 1 and
+; 2 of `!SchemeDue` are `full`'s set and damage step, `FullFrame`'s: one test
+; in NMI for both, as it was before Step 8 cost the title's first frame.)
 SchemeLater:
         php
         sep #$20
@@ -25751,12 +25800,26 @@ SchemeLater:
 SchemeNmi:
         sep #$20
         lda.w !SchemeDue
-        beq +
+        beq .none
         stz.w !SchemeDue
+        lsr a
+        bcc .full               ; bit 0: the whole scheme, and its badge
         jsl LoadPalette
 .badge                                  ; the `schemes` rung's fault patches this
         jmp BadgeShow           ; whose `rtl` is this one's
-+       rtl
+.full                                   ; colorization Step 8, `FullFrame`'s:
+        rep #$30                ;   bit 1 the set's BG3 palettes, bit 2
+        lsr a                   ;   OBJ palette 2
+        bcc +
+        pha
+        jsr FullBg
+        pla
++       lsr a
+        bcc +
+        jsr FullObj2Load
++       sep #$20
+.none
+        rtl
 
 ; `colors.sram_magic`: SRAM holds slot schemes.
 SchemeMagic:
@@ -27630,9 +27693,13 @@ DebugNmi:
         rep #$20
         lda.w #!DEBUG_HEX_VRAM
         sta !VMADDL
-        lda.w #DebugHexFont&$FFFF
-        ldx.w #DebugHexFont>>16
-        ldy.w #DebugHexFontEnd-DebugHexFont
+        sep #$20
+        lda.l DebugHexFontPtr+2
+        rep #$20
+        and.w #$00FF
+        tax
+        lda.l DebugHexFontPtr
+        ldy.w #!DEBUG_HEX_BYTES
         jsr .dma
         rep #$20
         lda.w #!DEBUG_CURSOR_VRAM
@@ -27724,30 +27791,11 @@ DebugNmi:
 ; The readout's seventeen glyphs again for the debug menu, in colour 1 -- plane
 ; 0 alone -- where the readout's are colour 3. Palette 0's colour 1 is white and
 ; its colour 3 dark grey, and the item font's letters beside them are colour 1.
-; `snes_inject.zig`'s test holds the rows to the readout's.
-macro glyph1(r0, r1, r2, r3, r4, r5, r6, r7)
-        db <r0>, 0, <r1>, 0, <r2>, 0, <r3>, 0, <r4>, 0, <r5>, 0, <r6>, 0, <r7>, 0
-        db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-endmacro
-DebugHexFont:
-        %glyph1($00, $7E, $66, $66, $66, $7E, $00, $00) ; 0
-        %glyph1($00, $18, $78, $18, $18, $7E, $00, $00) ; 1
-        %glyph1($00, $7E, $06, $7E, $60, $7E, $00, $00) ; 2
-        %glyph1($00, $7E, $06, $7E, $06, $7E, $00, $00) ; 3
-        %glyph1($00, $66, $66, $7E, $06, $06, $00, $00) ; 4
-        %glyph1($00, $7E, $60, $7E, $06, $7E, $00, $00) ; 5
-        %glyph1($00, $7E, $60, $7E, $66, $7E, $00, $00) ; 6
-        %glyph1($00, $7E, $06, $06, $06, $06, $00, $00) ; 7
-        %glyph1($00, $7E, $66, $7E, $66, $7E, $00, $00) ; 8
-        %glyph1($00, $7E, $66, $7E, $06, $7E, $00, $00) ; 9
-        %glyph1($00, $18, $66, $7E, $66, $66, $00, $00) ; A
-        %glyph1($00, $78, $66, $78, $66, $78, $00, $00) ; B
-        %glyph1($00, $1E, $60, $60, $60, $1E, $00, $00) ; C
-        %glyph1($00, $78, $66, $66, $66, $78, $00, $00) ; D
-        %glyph1($00, $7E, $60, $7E, $60, $7E, $00, $00) ; E
-        %glyph1($00, $7E, $60, $7E, $60, $60, $00, $00) ; F
-        %glyph1($00, $00, $18, $00, $18, $00, $00, $00) ; :
-DebugHexFontEnd:
+; Not here since colorization Step 8, for these banks' room: the builder makes
+; them from `ReadoutFont` (`snes_inject.debugHexFont`), as the `debug` class's
+; last blob, and points this at it. NMI may not walk the directory.
+DebugHexFontPtr:
+        db $FF, $FF, $FF
 
 ; The blank and the cursor, BG1 4bpp: the cursor's rows in plane 0, colour 1,
 ; as the item font's letters.
@@ -31714,12 +31762,33 @@ SchemeTable:
 ; In bank 1 since colour schemes Step 3, read long, to make room in bank 0.
 ; `Reset` comes in at `LoadDefaultPalette`: WRAM is zero there, and every boot
 ; that skips the title plays in the default.
+;
+; Colorization Step 8: `full` is its own table (`LoadFull`), tested at
+; `LoadPalette`, every caller's entry but `Reset`'s. **`Reset`'s path is the
+; cycles it was before Step 8**: `AudioBoot` follows it, and the upload's
+; byte-by-byte handshake with the SPC700 stretches with the CPU's phase
+; against it. Nine cycles here cost the upload 19 lines, which put the title,
+; and everything after it, a frame later than the Game Boy's.
 ; ---------------------------------------------------------------------------
+LoadPalette:
+        php
+        sep #$20
+        lda.w !Scheme
+        cmp.b #!SCHEME_FULL
+        bne +
+        lsr a                   ; colorization Step 7: `PutObject`'s page, 1
+        sta.w !ObjPage
+        rep #$30
+        jsr LoadFull
+        plp
+        rtl
++       plp
+        bra LoadPaletteOne
 LoadDefaultPalette:
         sep #$20
         lda.b #!DEFAULT_SCHEME
         sta.w !Scheme
-LoadPalette:
+LoadPaletteOne:                         ; one palette a layer: `mono` and `gbc`
         php
         sep #$20
         lda.w !Scheme           ; colorization Step 7: `PutObject`'s page
@@ -31831,6 +31900,236 @@ LoadPalette:
         sep #$20
         pla
         rts
+
+; ---------------------------------------------------------------------------
+; Colorization Step 8: where `full`'s colours are, `colors.fullTable`
+; (`!FULL_WORDS` words, laid out at `!FULL_*_AT`): the `slots` class's blob 1,
+; which the builder points this at. These two banks have no room for the
+; table, and NMI may not walk the directory. $FF until patched.
+; ---------------------------------------------------------------------------
+FullTablePtr:
+        db $FF, $FF, $FF
+
+; All of `full` into CGRAM, in the `surface` set: `LoadPalette`'s, so the
+; title, a boot, game over and the credits (`FullSurface`) show it. Play's
+; sets follow from `FullFrame`. 16-bit A and index in; 8-bit A out.
+LoadFull:
+        sep #$20
+        lda.b #!SET_SURFACE
+        sta.w !FullWant
+        stz.w !FullStep
+        rep #$30
+        jsr FullBg
+        ldx.w #$0000            ; the window's palettes, `!HUD_PAL` on
+-       sep #$20
+        txa
+        clc
+        adc.b #!HUD_PAL
+        asl a
+        asl a
+        asl a
+        asl a
+        sta !CGADD
+        rep #$20
+        txa
+        asl a
+        asl a
+        asl a
+        clc
+        adc.w #!FULL_WIN_AT
+        jsr FullDma
+        inx
+        cpx.w #!WIN_PALS
+        bne -
+        ldx.w #$0000            ; the objects' 8, sixteen colours apart from $80
+-       sep #$20
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        ora.b #$80
+        sta !CGADD
+        rep #$20
+        txa
+        asl a
+        asl a
+        asl a
+        clc
+        adc.w #!FULL_OBJ_AT
+        jsr FullDma
+        inx
+        cpx.w #8
+        bne -
+        sep #$20
+        stz.w !FullObj2         ; OBJ palette 2 holds slot 2's own colours
+        rts
+
+; The set in `!FullWant`'s BG3 palettes into CGRAM $00-$1F, and `!FullSet`
+; says so. 16-bit A and index in and out.
+FullBg:
+        sep #$20
+        stz !CGADD
+        lda.w !FullWant
+        sta.w !FullSet
+        rep #$20
+        and.w #$00FF
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a                   ; `!FULL_SET_BYTES` a set
+        ldy.w #!FULL_SET_BYTES
+        jmp FullDmaY
+
+; OBJ palette 2: slot 2's own colours at step 0, else the damage step's, and
+; `!FullObj2` says which. 16-bit A and index in and out.
+FullObj2Load:
+        sep #$20
+        lda.b #$80+(!OBJ_DAMAGE_PAL*16)
+        sta !CGADD
+        lda.w !FullStep
+        sta.w !FullObj2
+        rep #$20
+        and.w #$00FF
+        beq +
+        dec a
+        asl a
+        asl a
+        asl a
+        clc
+        adc.w #!FULL_DMG_AT
+        bra FullDma
++       lda.w #!FULL_OBJ_AT+(!OBJ_DAMAGE_PAL*8)
+        ; fall through
+; One palette's 8 bytes at the table's +A into CGRAM at its address, by DMA on
+; channel 2, as `.four`'s. `FullDmaY` takes the byte count in Y. The table
+; never crosses a bank (`snes_inject.patchFull`). 16-bit A in and out; keeps X.
+FullDma:
+        ldy.w #8
+FullDmaY:
+        clc
+        adc.l FullTablePtr
+        sta !A1T2L
+        sty !DAS2L
+        sep #$20
+        stz !DMAP2              ; one register, incrementing source
+        lda.b #!CGDATA&$FF
+        sta !BBAD2
+        lda.l FullTablePtr+2
+        sta !A1B2
+        lda.b #$04
+        sta !MDMAEN
+        rep #$20
+        rts
+
+; From game over's and the credits' setups, in forced blank: `full` shows its
+; `surface` set there. Nothing in the other schemes. Any widths; keeps them.
+FullSurface:
+        php
+        sep #$20
+        lda.w !Scheme
+        cmp.b #!SCHEME_FULL
+        bne +
+        jsl LoadPalette
++       plp
+        rtl
+
+; Once a play frame, from `DrawEnemies`' end, and only in `full`: the colour
+; set the camera's cell wants (`areas.lookOf`: the Queen's room over a nest
+; over a lava table over the area) and the damage step OBJ palette 2 wants
+; (`!MetStep`, none in her room). What differs from CGRAM is NMI's: bits 1
+; and 2 of `!SchemeDue`, which `SchemeNmi` loads. `FindBlob`'s
+; direct page is kept: the frame's other code may hold a blob across this.
+; Any widths; keeps them.
+FullFrame:
+        php
+        rep #$30
+        pei ($0E)               ; `!ArgClass`/`!ArgId`, `!Blob`, `!BlobLen`,
+        pei ($10)               ;   `!Dir` and `!DirCount`: $0E-$19
+        pei ($12)
+        pei ($14)
+        pei ($16)
+        pei ($18)
+        sep #$20
+        lda.b #!CLASS_MAP_CELLS
+        sta !ArgClass
+        lda !MapIndex
+        sta !ArgId
+        jsl FindBlobLong
+        bcs +
+        jml Fatal
++       sep #$20
+        lda !CamY+1             ; the camera's cell, as `enter_queen`'s
+        asl a
+        asl a
+        asl a
+        asl a
+        pha
+        lda !CamX+1
+        and.b #$0F
+        ora 1,s
+        rep #$30
+        and.w #$00FF
+        clc
+        adc.w #!AREA_AT
+        tay
+        sep #$20
+        pla
+        lda [!Blob],y           ; the cell's area byte
+        rep #$30
+        ply                     ; the direct page back
+        sty $18
+        ply
+        sty $16
+        ply
+        sty $14
+        ply
+        sty $12
+        ply
+        sty $10
+        ply
+        sty $0E
+        sep #$30
+        ldx.b #$00              ; her room: OBJ palette 2 is hers
+        cmp.b #!AREA_QUEEN
+        beq .want
+        bit.b #!NEST_BIT
+        beq .lava
+        and.b #$7F              ; a nest: the area's variant
+        clc
+        adc.b #!AREA_COUNT
+        bra .step
+.lava
+        pha
+        lda !TileTable          ; `warp.isLavaTable`: metatile tables 6-8
+        and.b #$0F
+        cmp.b #6
+        bcc +
+        cmp.b #9
+        bcs +
+        pla
+        lda.b #!SET_ACID
+        bra .step
++       pla
+.step
+        ldx.w !MetStep
+.want
+        ; Both stored before either is owed, so NMI never loads half of one.
+        stx.w !FullStep
+        sta.w !FullWant
+        cmp.w !FullSet
+        beq +
+        lda.b #$02
+        tsb.w !SchemeDue
++       lda.w !FullStep
+        cmp.w !FullObj2
+        beq +
+        lda.b #$04
+        tsb.w !SchemeDue
++       plp
+        rtl
 
 ; The window's map to $FF, as `bootRoutine`'s `clearTilemaps` (00:$01FB) and
 ; `gameMode_dead`'s leave the Game Boy's $9C00: the rows the status bar, the
@@ -38734,6 +39033,7 @@ GameOverScreen:
         sep #$20
         lda.b #$80
         sta !INIDISP
+        jsl FullSurface         ; colorization Step 8: `full`'s surface set
         rep #$30
         %call0(InitOam)         ; $36C7 `hOamBufferIndex` and $36CA `clearAllOam`
         %call0(UploadTitleChr)  ; $36CD-$36E4
@@ -38885,6 +39185,7 @@ CreditsSetup:
         lda.b #$80
         sta !INIDISP
         jsl QueenOff                    ; her channels, as the GAME OVER screen's
+        jsl FullSurface                 ; colorization Step 8: `full`'s surface set
         sep #$20
         rep #$10
         ; $58AF-$58BB: `bg_palette` $93; the objects' $93 and $43 have no port

@@ -355,6 +355,30 @@ Since colorization Step 6 every tilemap word carries its tile's slot.
   uses all eight, BG3 palettes 0-7 (CGRAM `$00-$1F`). Sprites use slots 0-7,
   which map to SNES OBJ palettes 0-7 (CGRAM `$80-$FF`); palette 2 doubles as
   the Metroid damage palette outside the Queen's room.
+- **Colours and CGRAM** (Step 8). `colors.full` holds `full`'s colours,
+  shade-indexed like every scheme's: 8 BG slots per colour set
+  (`areas.setOf`: the 12 areas, 11 `nest` variants, `acid`; 24 sets), and
+  global window, OBJ and Metroid damage tables. `colors.fullTable` applies
+  the live registers (BGP `$93` to BG and window, OBP0 `$93` to every OBJ
+  palette: an OBP1 object changes palette, not register, as in EJRTQ). The
+  table is the `slots` class's blob 1; the engine's two banks have no room
+  for it, so the builder points `FullTablePtr` at it. (The debug menu's
+  digits moved out the same way, `DebugHexFontPtr`, to make room for the
+  code.) `LoadPalette` loads all of it in the `surface` set: the title, game
+  over and the credits (`FullSurface`). In play, `FullFrame`, at the end of
+  `DrawEnemies`, reads the camera cell's area byte and the metatile table,
+  picks the set as `areas.lookOf`, and asks NMI for the BG3 palettes when
+  the set changes and for OBJ palette 2 when the damage step changes (bits 1
+  and 2 of `!SchemeDue`, which `SchemeNmi` already tests). Fades and flashes
+  stay INIDISP brightness, as in `gbc`.
+- **Cost outside `full`** (Step 8). `mono` and `gbc` pay one branch a play
+  frame, and nothing in NMI. `Reset`'s path through `LoadPalette` is the
+  cycles it was: `AudioBoot`'s upload is a byte-by-byte handshake with the
+  SPC700, and nine cycles before it stretched it 19 lines, which moved the
+  title and everything after it a frame against the Game Boy's (the `title`
+  and `queen` rungs). The title also discards a stale NMI flag before NMI
+  on, so a setup that ends inside a vblank still gets a whole vblank for
+  its first frame.
 
 ## Decisions
 
@@ -363,9 +387,12 @@ Since colorization Step 6 every tilemap word carries its tile's slot.
 - **Tile-id edits:** for the HUD and the Queen area, the oracle derives a
   slot per original tile id and reports any id that gets more than one.
   Hand-picked overrides are committed with the assignment data.
-- **Fades and flashes:** the port keeps the original's DMG-register effects,
-  remapping the four shades within each slot as `gbc` does. It does not
-  take EJRTQ's colour darkening. So colour 3 is each slot's darkest colour,
-  and a data test checks it.
+- **Fades and flashes:** the port keeps the original's effects as `gbc`
+  does: CGRAM holds each slot through the live registers, and fades and
+  flashes are INIDISP brightness and colour math (amended 2026-11-22: the
+  port never remapped CGRAM on register writes). It does not take EJRTQ's
+  colour darkening. Colour 3 is still each slot's darkest colour, and a data
+  test checks it.
+- **The title, game over and the credits** use the `surface` set.
 - **The Queen's room** is its own colour area, in place of EJRTQ's
   door-script override of palette 4.

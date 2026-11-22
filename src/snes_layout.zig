@@ -394,7 +394,7 @@ pub const directory_entry_bytes: usize = 8;
 pub fn blobCount(set: convert.Set) usize {
     return set.assets.len + set.metatiles.len + set.collision.len +
         1 + set.map_cells.len + set.map_screens.len + 2 + 1 +
-        1 + set.physics.len + set.metasprites.len + set.enemies.len + set.aram.len + set.title_art.len + set.debug.len + 1; // the slots blob, solidity, doors and load_sources, door_pointers, the directory
+        1 + set.physics.len + set.metasprites.len + set.enemies.len + set.aram.len + set.title_art.len + set.debug.len + 2; // the slots and full_colours blobs, solidity, doors and load_sources, door_pointers, the directory
 }
 
 pub fn directoryBytes(set: convert.Set) usize {
@@ -469,7 +469,7 @@ pub fn measure(set: convert.Set) Measure {
     std.debug.assert(set.debug.len <= max_blobs);
     measureBlobs(&m.classes[@intFromEnum(Class.debug)], .debug, set.debug, &buf);
 
-    measureBlobs(&m.classes[@intFromEnum(Class.slots)], .slots, &.{set.slots}, &buf);
+    measureBlobs(&m.classes[@intFromEnum(Class.slots)], .slots, &.{ set.slots, set.full_colours }, &buf);
 
     return m;
 }

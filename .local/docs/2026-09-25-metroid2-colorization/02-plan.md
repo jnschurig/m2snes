@@ -270,33 +270,40 @@ two other ways:
         3; posed as an Alpha at 1/8, `!MetStep` is 3.)
   - [x] Commit: "full: per-sprite palettes".
 
-- [ ] **Step 8: The `full` scheme — CGRAM, the L cycle and the badge**
-  - [ ] `colors.zig`: `full = 2`. Its data shape: per colour set (12 areas,
+- [x] **Step 8: The `full` scheme — CGRAM, the L cycle and the badge**
+  - [x] `colors.zig`: `full = 2`. Its data shape: per colour set (12 areas,
         11 `nest` variants, `acid`), 8 BG slots × 4 colours; global OBJ slots,
         with Samus in Samus Returns' Power and Varia colours; window slots.
         One CGRAM image per colour set through the live registers
         (`screens.live_bgp/obp0/obp1`), as `gbc`'s. ROM-free unit tests on
         synthetic tables cover the image builder.
-  - [ ] Engine: reload CGRAM in vblank when the colour set changes
+  - [x] Engine: reload CGRAM in vblank when the colour set changes
         (`areas.lookOf`: the camera cell's byte in Step 4's per-screen table,
         and whether the loaded metatile table is a lava table). **Fades stay
         INIDISP brightness, as in `gbc`; no remap on BGP/OBP writes**
         (amended 2026-11-22: the cart never remaps CGRAM, `ApplyPalette`).
         The title, credits and game over use the `surface` set (James,
         2026-11-22).
-  - [ ] OBJ palette 2 (Step 7's decision): outside the Queen's room it holds
+  - [x] OBJ palette 2 (Step 7's decision): outside the Queen's room it holds
         the Metroid damage step `!MetStep` publishes (0 = slot 2's own
         colours), reloaded when the step changes; in her room, her slot-2
         colours whatever `!MetStep` says.
-  - [ ] L cycles three schemes, with the badge glyphs for `FULL`. An older
+  - [x] L cycles three schemes, with the badge glyphs for `FULL`. An older
         cart reading id 2 already falls back.
-  - [ ] Placeholder colours: distinct hues per area. Real colours come in
+  - [x] Placeholder colours: distinct hues per area. Real colours come in
         Step 9. `acid` and each area's `nest` variant are colour sets like
         the areas.
-  - [ ] Verify: `zig build verify` green, and a scenario boot in `full`
+        (Done. `colors.full`/`fullTable`, `areas.setOf`; the table is the
+        `slots` class's blob 1 behind `FullTablePtr`, as the engine's banks
+        are full, and the debug menu's digits moved out the same way
+        (`DebugHexFontPtr`, `debug_tables.hexFontBlob`) to fit the code.
+        `FullFrame` from `DrawEnemies`, its reloads as `SchemeNmi` bits,
+        `FullSurface` at game over and the credits. The scheme rung reads the
+        window at `$20`, where it is since Step 6.)
+  - [x] Verify: `zig build verify` green, and a scenario boot in `full`
         (through the SRAM scheme byte, not WRAM pokes) shows non-palette-0
         words.
-  - [ ] Commit: "full: scheme, CGRAM and L cycle".
+  - [x] Commit: "full: scheme, CGRAM and L cycle".
 
 - [ ] **Step 9: Samus Returns colours**
   - [ ] Pick per-area colours by eye from the reference screenshots, for each

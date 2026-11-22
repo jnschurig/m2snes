@@ -50,6 +50,8 @@ const offsets_table = @import("offsets.zig");
 const gfx_info = @import("gfx_info.zig");
 const colors = @import("colors.zig");
 const full_slots = @import("full_slots.zig");
+const areas = @import("areas.zig");
+const debug_tables = @import("debug_tables.zig");
 
 /// The assembled engine, committed. Both are imported rather than read from
 /// disk so the shipped builder is a single file with no data directory.
@@ -442,7 +444,7 @@ fn collect(gpa: std.mem.Allocator, set: convert.Set) !std.ArrayList(Source) {
     try appendBlobs(gpa, &list, .aram, set.aram);
     try appendBlobs(gpa, &list, .title_art, set.title_art);
     try appendBlobs(gpa, &list, .debug, set.debug);
-    try appendBlobs(gpa, &list, .slots, &.{set.slots});
+    try appendBlobs(gpa, &list, .slots, &.{ set.slots, set.full_colours });
     return list;
 }
 
@@ -540,6 +542,8 @@ pub fn build(gpa: std.mem.Allocator, set: convert.Set, boot: screen.Boot, diag: 
     try patchBoot(&rom, set, boot, diag);
     try patchSchemes(&rom, diag);
     try patchObjAttrs(&rom, diag);
+    try patchFull(&rom, diag);
+    try patchDebugHexFont(&rom, diag);
     patchHeader(&rom);
     return rom;
 }
@@ -615,6 +619,58 @@ fn patchSchemes(rom: *Rom, diag: *Diagnosis) Error!void {
             std.mem.writeInt(u16, rom.bytes[at + (id * scheme_words + i) * 2 ..][0..2], w, .little);
         }
     }
+}
+
+/// `FullTablePtr` at `full`'s colours, the `slots` class's blob 1
+/// (`colors.fullTable`, colorization Step 8): the engine's two banks have no
+/// room for the table, and NMI can't walk the directory. The table's size is
+/// checked against the engine's `!FULL_WORDS`, and it must not cross a bank,
+/// which a DMA can't follow.
+fn patchFull(rom: *Rom, diag: *Diagnosis) Error!void {
+    const at = symbolOffset("FullTablePtr") orelse {
+        diag.fail(null, "the engine image has no FullTablePtr symbol", .{});
+        return Error.PatchTableMissing;
+    };
+    const n = symbol("ConstFullWords") orelse 0;
+    const sets = symbol("ConstFullSets") orelse 0;
+    if (n != colors.full_table_words or sets != areas.set_count) {
+        diag.fail(null, "FullTable holds {d} words for {d} sets; colors.zig has {d} for {d}", .{
+            n, sets, colors.full_table_words, areas.set_count,
+        });
+        return Error.PatchTableMismatch;
+    }
+    try patchPtr(rom, diag, at, .slots, 1, colors.full_table_words * 2);
+}
+
+/// The debug menu's digits, `DebugHexFontPtr` at the `debug` class's
+/// `hex_font` blob (colorization Step 8, out of the engine for room).
+fn patchDebugHexFont(rom: *Rom, diag: *Diagnosis) Error!void {
+    const at = symbolOffset("DebugHexFontPtr") orelse {
+        diag.fail(null, "the engine image has no DebugHexFontPtr symbol", .{});
+        return Error.PatchTableMissing;
+    };
+    const n = symbol("ConstDebugHexBytes") orelse 0;
+    try patchPtr(rom, diag, at, .debug, @intFromEnum(debug_tables.Which.hex_font), n);
+}
+
+/// The three bytes at `at` to blob (`class`, `id`), which must hold `len`
+/// bytes and not cross a bank: the engine reads it by DMA in NMI, which can
+/// neither walk the directory nor follow a bank.
+fn patchPtr(rom: *Rom, diag: *Diagnosis, at: usize, class: layout.Class, id: u8, len: usize) Error!void {
+    const bytes = findBlob(rom.*, class, id) orelse {
+        diag.fail(null, "class {s} has no blob {d}", .{ @tagName(class), id });
+        return Error.PatchTableMissing;
+    };
+    if (bytes.len != len) {
+        diag.fail(null, "class {s} blob {d} is {d} bytes; the engine reads {d}", .{ @tagName(class), id, bytes.len, len });
+        return Error.PatchTableMismatch;
+    }
+    const addr = blobAddress(rom.*, class, id).?;
+    if ((addr & 0xFFFF) + len > 0x10000) {
+        diag.fail(null, "class {s} blob {d} at ${X:0>6} crosses a bank", .{ @tagName(class), id, addr });
+        return Error.PatchTableMismatch;
+    }
+    writeAddr(rom.bytes[at..][0..3], addr);
 }
 
 /// `full`'s page of `PutObject`'s attribute table, `PutAttrFull`, from
@@ -1460,6 +1516,18 @@ test "the scheme table is colors.zig's, every scheme in id order" {
     for (image[at..][0 .. colors.count * scheme_words * 2]) |b| try testing.expectEqual(@as(u8, 0xFF), b);
     // And `snes boot` code 15 can tell the default from the old greys.
     try testing.expect(!std.mem.eql(u16, &colors.cgramWords(.mono), &colors.cgramWords(colors.default_scheme)));
+
+    // Colorization Step 8: `FullTablePtr`, $FF until patched, at the
+    // `full_colours` blob, which is `colors.fullTable`.
+    const fat = symbolOffset("FullTablePtr").?;
+    for (image[fat..][0..3]) |b| try testing.expectEqual(@as(u8, 0xFF), b);
+    const addr = blobAddress(rom, .slots, 1).?;
+    try testing.expectEqual(addr, readAddr(rom.bytes[fat..][0..3]));
+    const blob = blobBytes(rom, .slots, 1).?;
+    try testing.expectEqual(colors.full_table_words * 2, blob.len);
+    for (colors.fullTable(), 0..) |w, i| {
+        try testing.expectEqual(w, std.mem.readInt(u16, blob[i * 2 ..][0..2], .little));
+    }
 }
 
 test "PutObject's attribute pages: gbc's assembled, full's patched from full_slots" {
@@ -1837,15 +1905,53 @@ test "the engine's L badge constants are title_badge's" {
 test "the debug menu's digits are the readout's, in colour 1" {
     // 1.0 Step 4. The same seventeen glyphs, drawn white beside the item
     // font's letters: plane 0 is the readout's rows and plane 1 is empty.
+    // Colorization Step 8: the digits are `debug_tables.hexFontBlob`, out of
+    // the engine for its banks' room.
+    const a = testing.allocator;
+    const font = try debug_tables.hexFontBlob(a);
+    defer a.free(font);
     const r = symbolOffset("ReadoutFont").?;
-    const d = symbolOffset("DebugHexFont").?;
-    const n = symbolOffset("DebugHexFontEnd").? - d;
+    const n = font.len;
     try testing.expectEqual(symbolOffset("ReadoutFontEnd").? - r, n);
+    try testing.expectEqual(@as(u32, @intCast(n)), symbol("ConstDebugHexBytes").?);
     var i: usize = 0;
     while (i < n) : (i += 2) {
-        try testing.expectEqual(image[r + i], image[d + i]);
-        try testing.expectEqual(@as(u8, 0), image[d + i + 1]);
+        try testing.expectEqual(image[r + i], font[i]);
+        try testing.expectEqual(@as(u8, 0), font[i + 1]);
     }
+    // And the cart points the menu at it.
+    for (image[symbolOffset("DebugHexFontPtr").?..][0..3]) |b| try testing.expectEqual(@as(u8, 0xFF), b);
+}
+
+test "the cart points DebugHexFontPtr at the debug class's digits" {
+    const gpa = testing.allocator;
+    const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(bytes);
+    var set = try convert.run(gpa, bytes);
+    defer set.deinit();
+    const boot = try screen.chooseBoot(gpa, bytes);
+    var diag: Diagnosis = .{};
+    var rom = try build(gpa, set, boot, &diag);
+    defer rom.deinit();
+    const id = @intFromEnum(debug_tables.Which.hex_font);
+    const at = symbolOffset("DebugHexFontPtr").?;
+    try testing.expectEqual(blobAddress(rom, .debug, id).?, readAddr(rom.bytes[at..][0..3]));
+    const font = try debug_tables.hexFontBlob(gpa);
+    defer gpa.free(font);
+    try testing.expectEqualSlices(u8, font, blobBytes(rom, .debug, id).?);
+}
+
+test "the engine's full-scheme constants are the Zig side's" {
+    // Colorization Step 8: `FullFrame` reads the area byte and picks the set
+    // as `areas.lookOf` and `areas.setOf` do.
+    try testing.expectEqual(@as(u32, convert.area_offset), symbol("ConstAreaAt").?);
+    try testing.expectEqual(@as(u32, areas.Area.count), symbol("ConstAreaCount").?);
+    try testing.expectEqual(@as(u32, @intFromEnum(areas.Area.queen)), symbol("ConstAreaQueen").?);
+    try testing.expectEqual(@as(u32, areas.nest_bit), symbol("ConstNestBit").?);
+    try testing.expectEqual(@as(u32, full_slots.metroid_damage_palette), symbol("ConstObjDamagePal").?);
+    try testing.expectEqual(@as(u32, colors.full_table_words), symbol("ConstFullWords").?);
+    try testing.expectEqual(@as(u32, areas.set_count), symbol("ConstFullSets").?);
+    try testing.expectEqual(@as(u32, @intFromEnum(colors.Scheme.full)), symbol("ConstSchemeFull").?);
 }
 
 test "the engine's debug-table constants are debug_tables'" {

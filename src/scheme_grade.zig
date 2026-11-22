@@ -34,14 +34,15 @@ const screen = @import("snes_screen.zig");
 const target = @import("snes_target.zig");
 
 pub const Run = enum {
-    /// (a) Empty slots: L recolours the title to `mono` and back, and keeps
-    /// nothing in SRAM.
+    /// (a) Empty slots: L recolours the title to `full`, `mono` and back, and
+    /// keeps nothing in SRAM.
     l_press,
     /// (b) Slot 0 a game in `mono`, slot 1 a game in `gbc`, slot 2 empty with
     /// `mono` in its byte: moving the slot recolours to each slot's scheme, and
     /// the empty slot's byte is not read.
     slot_move,
-    /// (c) Slots 0 and 1 games, no magic: L on slot 0 keeps `mono` at once,
+    /// (c) Slots 0 and 1 games, no magic: L on slot 0 keeps `full` and then
+    /// `mono` at once,
     /// with the other slots at the default. The reset button, and slot 0 is
     /// still `mono` and slot 1 `gbc`; Start plays in `mono`.
     keep,
@@ -129,8 +130,8 @@ fn ops(run: Run) []const Op {
     const kept: [save.slots]u8 = .{ mono, dflt, dflt };
     return switch (run) {
         .l_press => &.{
-            .{ .expect = .gbc },  .{ .press = .l }, .{ .expect = .mono }, .{ .sram = null },
-            .{ .press = .l },     .{ .expect = .gbc },
+            .{ .expect = .gbc },  .{ .press = .l }, .{ .expect = .full }, .{ .sram = null },
+            .{ .press = .l },     .{ .expect = .mono }, .{ .press = .l }, .{ .expect = .gbc },
         },
         .slot_move => &.{
             .{ .expect = .mono }, .{ .press = .right }, .{ .expect = .gbc }, .{ .press = .right },
@@ -139,6 +140,7 @@ fn ops(run: Run) []const Op {
         },
         .keep => &.{
             .{ .expect = colors.default_scheme }, .{ .sram = null },        .{ .press = .l },
+            .{ .expect = .full },                 .{ .press = .l },
             .{ .expect = .mono },                 .{ .sram = kept },        .reset,
             .{ .expect = .mono },                 .{ .press = .right },     .{ .expect = .gbc },
             .{ .press = .left },                  .{ .expect = .mono },     .start,
@@ -149,15 +151,17 @@ fn ops(run: Run) []const Op {
             .{ .expect = .gbc },  .{ .sram = kept },
         },
         .empty_slot => &.{
-            .{ .expect = colors.default_scheme }, .{ .press = .l },     .{ .expect = .mono },
+            .{ .expect = colors.default_scheme }, .{ .press = .l },     .{ .expect = .full },
+            .{ .press = .l },                     .{ .expect = .mono },
             .{ .sram = null },                    .{ .press = .right }, .{ .expect = colors.default_scheme },
             .{ .press = .left },                  .{ .expect = colors.default_scheme }, .{ .press = .l },
+            .{ .press = .l },
             .{ .expect = .mono },                 .start,               .{ .expect = .mono },
             .{ .sram = kept },                    .reset,               .{ .expect = colors.default_scheme },
         },
         .cleared => &.{
             .{ .expect = .mono }, .clear,           .{ .expect = colors.default_scheme }, .{ .press = .l },
-            .{ .expect = .mono }, .{ .sram = kept },
+            .{ .expect = .full }, .{ .sram = kept },
         },
         .bad_magic => &.{ .{ .expect = colors.default_scheme }, .start, .{ .expect = colors.default_scheme } },
         .bad_id => &.{
@@ -259,14 +263,16 @@ pub fn writeLua(rom: []const u8, run: Run, w: *std.Io.Writer) !void {
         \\-- SRAM's scheme bytes: the magic, then an id a slot.
         \\local SCHEME_AT, SLOTS, SLOT_SIZE = {d}, {d}, {d}
         \\-- CGRAM's scheme words, as `LoadPalette` writes them: four runs of
-        \\-- four, at these colours.
-        \\local RUNS = {{ 0x00, 0x10, 0x80, 0x90 }}
+        \\-- four, at these colours: BG3's palette 0, the window's first, and
+        \\-- the objects' 0 and 1 (`colors.cgramWords`).
+        \\local RUNS = {{ 0x00, {d}, 0x80, 0x90 }}
         \\
     , .{
         @tagName(run),
         try sym("VarFrameCount"), try sym("VarUnhandled"), try sym("VarActiveSlot"),
         limit,                    settle,                  in_play,
         colors.sram_at,           save.slots,              save.slot_size,
+        @as(u16, target.hud_palette) * 16,
     });
     try writeWords(w);
     try writeBadge(w);

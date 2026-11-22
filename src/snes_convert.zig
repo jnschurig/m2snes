@@ -48,6 +48,7 @@ const gfx_info = @import("gfx_info.zig");
 const warp = @import("warp.zig");
 const areas = @import("areas.zig");
 const full_slots = @import("full_slots.zig");
+const colors = @import("colors.zig");
 
 pub const Error = error{
     /// A door script names a source address that falls in no offsets entry.
@@ -1016,8 +1017,12 @@ pub const Set = struct {
     /// The debug menu's lists, 1.0 Steps 4 and 5b, in `debug_tables.Which` order.
     debug: []Blob = &.{},
     /// Every character sheet's palette slots (`full_slots`), colorization
-    /// Step 6: one blob, id 0.
+    /// Step 6: blob id 0.
     slots: Blob = .{ .name = "slots", .bytes = &.{} },
+    /// `full`'s colours, `colors.fullTable`, colorization Step 8: the `slots`
+    /// class's blob id 1. The engine reads it through `FullTablePtr`, which
+    /// the injector points at it.
+    full_colours: Blob = .{ .name = "full_colours", .bytes = &.{} },
     /// The gfxInfo records `loadGraphics` walks, 1.0 Step 8a, which
     /// `snes_inject` writes into the engine's `GfxInfo` table once each
     /// sheet's asset id is known.
@@ -1043,6 +1048,14 @@ pub const Blob = struct {
     name: []const u8,
     bytes: []u8,
 };
+
+/// `colors.fullTable` as little-endian bytes (colorization Step 8).
+fn fullColoursBlob(a: std.mem.Allocator) ![]u8 {
+    const words = colors.fullTable();
+    const out = try a.alloc(u8, words.len * 2);
+    for (words, 0..) |w, i| std.mem.writeInt(u16, out[i * 2 ..][0..2], w, .little);
+    return out;
+}
 
 /// The `slots` blob for `assets` (colorization Step 6): each character
 /// sheet's tiles' palette slots, keyed by asset id. See `full_slots`.
@@ -1600,6 +1613,7 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
     set.title_art = try titleArtBlobs(a);
     set.debug = try debugBlobs(a, rom, walked);
     set.slots = .{ .name = "slots", .bytes = try slotsBlob(a, set.assets) };
+    set.full_colours = .{ .name = "full_colours", .bytes = try fullColoursBlob(a) };
     set.gfx_info = try gfx_info.decode(rom);
 
     return set;
@@ -1632,6 +1646,7 @@ fn debugBlobs(a: std.mem.Allocator, rom: []const u8, walked: []const warp.Walked
     for (debug_tables.warp_lists, wb.lists) |w, l| out[@intFromEnum(w)] = .{ .name = @tagName(w), .bytes = l };
     out[@intFromEnum(W.warp_data)] = .{ .name = "warp_data", .bytes = wb.data };
     out[@intFromEnum(W.larvae)] = .{ .name = "debug_larvae", .bytes = try debug_tables.larvaeBlob(a, rom) };
+    out[@intFromEnum(W.hex_font)] = .{ .name = "debug_hex_font", .bytes = try debug_tables.hexFontBlob(a) };
     return out;
 }
 

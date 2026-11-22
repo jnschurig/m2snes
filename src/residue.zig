@@ -339,7 +339,7 @@ pub const fields = [_]Field{
         .establishes = .boot_record,
         .carry = .carried,
         .measure = .map_index,
-        .reads = &.{ "LoadCellFlags", "LoadScreen", "LoadScreenPri", "PeekScreen", "Readout", "ResetEntities", "SpawnListAt", "StartTransition", "StreamResolve" },
+        .reads = &.{ "FullFrame", "LoadCellFlags", "LoadScreen", "LoadScreenPri", "PeekScreen", "Readout", "ResetEntities", "SpawnListAt", "StartTransition", "StreamResolve" },
         .note = "Seeded from the record the movie oracle builds out of $D811, so this is a difference the oracle already closes. Since Step 5 it is also *written* by a transition -- `WARP` puts the destination bank here, which is what stops the record being the only thing that decides which map the cart is in. Step 9 gave it a sixth reader: `SpawnListAt` turns it into the `(bank - 9) * 256` base of the enemy pointer table, which is the same 7 x 256 geometry `offsets.zig` derives the table's size from. Step 15a adds `ResetEntities`, which names the spawn flags' save window by it. Step 24e adds `LoadScreenPri` (00:$3ED5), which reads bit 11 of the transition word of Samus's screen out of this bank's cells.",
     },
     .{
@@ -354,7 +354,7 @@ pub const fields = [_]Field{
         .define = "TileTable",
         .establishes = .boot_script,
         .carry = .carried,
-        .reads = &.{ "LoadMetaBase", "Readout" },
+        .reads = &.{ "FullFrame", "LoadMetaBase", "Readout" },
         .note = "Left by the replayed door script. (`Readout`, Step 14's playtest aid, only displays it.) The Game Boy keeps the same selection somewhere unpinned; `compareWorlds` grades the result rather than the variable, which is the stronger check and the reason this one is not urgent. **Its one reader moved in Step 6 and that was a defect being fixed, not a refactor.** `LoadScreen` read it and derived `!Meta` from it, and `LoadScreen` runs once, at boot -- so a `TILETABLE` mid-run changed this byte and changed nothing else, and every metatile drawn afterwards came out of the table the cart booted with. `LoadMetaBase` is the derivation given a name, and the opcode calls it.",
     },
     .{
@@ -481,7 +481,7 @@ pub const fields = [_]Field{
         .establishes = .boot_record,
         .carry = .carried,
         .measure = .camera_x,
-        .reads = &.{ "CameraGuideX", "CollideCentreX", "CollideSamusEnemiesHoriz", "DeriveScroll", "DoorEnterQueen", "HandleCamera", "LatchCell", "LoadEnemies", "PoseToStomach", "QueenInitialize", "QueenScroll", "SaveFileToSram", "SeedWindow", "StepDoorScript", "StreamDue", "TransitionCamera", "WarpDraw", "WriteScroll" },
+        .reads = &.{ "CameraGuideX", "CollideCentreX", "CollideSamusEnemiesHoriz", "DeriveScroll", "DoorEnterQueen", "FullFrame", "HandleCamera", "LatchCell", "LoadEnemies", "PoseToStomach", "QueenInitialize", "QueenScroll", "SaveFileToSram", "SeedWindow", "StepDoorScript", "StreamDue", "TransitionCamera", "WarpDraw", "WriteScroll" },
         .note = "**Written by a transition since Step 5** -- `WARP` replaces the screen half and keeps the pixel half, which is what carries the camera's offset within a screen across a room change. **The audit's second finding, and the one it was not looking for. Fixed by boot record version 4.** `InitState` used to put the camera exactly on Samus, on the argument that a seeded start should be in view on frame 0. The game does not: at the handover its camera is left where the opening's own scrolling left it, which is not on her. The difference was measured rather than argued -- $FFCA/$FFCB is pinned -- and it matters because five routines read it, `HandleCamera` and `StreamDue` among them, so it decides both what is on screen and which row or column the streamer owes. It reaches the physics only through `LatchCell`, which turns a camera position into the cell `LoadCellFlags` and `LoadScreen` then draw -- so a camera off by eight pixels could not move Samus on the frame it was wrong, but it could hand her a different tilemap a screen later. `BootCamX` carries it now and this row agrees. 1.0 Step 20a: `PoseToStomach` takes `scrollX` off it as `DeriveScroll` does (00:$0DCD).",
     },
     .{
@@ -489,7 +489,7 @@ pub const fields = [_]Field{
         .establishes = .boot_record,
         .carry = .carried,
         .measure = .camera_y,
-        .reads = &.{ "CameraGuideY", "DebugWarp", "DeriveScroll", "DoorEnterQueen", "HandleCamera", "LatchCell", "LoadEnemies", "QueenInitialize", "QueenScroll", "SaveFileToSram", "SeedWindow", "StepDoorScript", "StreamDue", "TransitionCamera", "WarpDraw", "WriteScroll" },
+        .reads = &.{ "CameraGuideY", "DebugWarp", "DeriveScroll", "DoorEnterQueen", "FullFrame", "HandleCamera", "LatchCell", "LoadEnemies", "QueenInitialize", "QueenScroll", "SaveFileToSram", "SeedWindow", "StepDoorScript", "StreamDue", "TransitionCamera", "WarpDraw", "WriteScroll" },
         .note = "As `CamX`, and it was the worse of the two: the vertical camera has further to go before it settles, so the disagreement lasted longer. `BootCamY` carries it now.",
     },
     .{
