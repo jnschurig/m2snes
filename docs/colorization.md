@@ -264,20 +264,66 @@ the OBP1 swap, the frozen rule, and which slots EJRTQ makes look alike.
 
 ## In the cart
 
-- **Key → cart state.** There is no area or tileset key. The cart already
-  copies graphics to Game Boy VRAM addresses (`LoadGraphics` and its
-  `GfxInfo` rows, the title and credits loaders, the door loads, and the
-  `hVramTransfer` queue drained by `GfxXferNmi`). Each copy also writes the
-  slots of its source tiles into a 384-entry WRAM table indexed by Game Boy
-  VRAM tile, mirroring `$D200-$D37F`. The committed data is one slot per
-  source tile.
-- **Tilemap writers** look up the tile's slot through the same signed or
-  unsigned addressing as `10:4175`/`418C`, and OR it into the SNES map word.
+Since colorization Step 6 every tilemap word carries its tile's slot.
+
+- **Key → cart state.** There is no area or tileset key. Each character
+  copy also writes its source tiles' slots into `!BgAttr` (`$1800`), one
+  byte per BG3 character: the high byte of a play-field word showing it,
+  the slot as its palette and BG3's priority bit. That mirrors
+  `$D200-$D37F`, indexed by BG3 character rather than by Game Boy VRAM tile:
+  BG3's characters `$00-$FF` are exactly what signed addressing reaches.
+  The writers are `DoCopy` (door scripts and the load's copies, through
+  `CopyAttrs`), `UploadTitleChr` (`UploadTitleSlots`, so GAME OVER too),
+  `CreditsChrRow`, and `UploadSamusBgTwin`. `GfxXferNmi`'s `GfxInfo`
+  copies go to the objects' characters only, and the Varia load stops at
+  `$7A`, below the twin.
+- **The slots** come from the builder's `slots` blob (`src/full_slots.zig`):
+  a byte per Game Boy tile of every character sheet, keyed by asset id,
+  which `SlotFill` DMAs into `!BgAttr` (channel 1, through the WRAM port). A
+  tile takes the slot of the `full_assign.zig` region tile holding its first
+  byte, after the hand choices in `tile_choices`; a tile in no region is
+  slot 0.
+- **Tilemap writers** OR `!BgAttr[char]` into each word: `BuildTilemap` and
+  `StreamOne` (`MetaPut`, which reads `!BgAttr` whole as the word's high
+  byte), `BlockWrite4`, `DestroyBlock`, `SeedWorld`, the
+  Queen's floor, body and feet, the credits' rows, and GAME OVER's clear
+  and text. A tilemap copy (`bg_queenHead`) goes up from a stage in WRAM
+  with its palettes (`CopyAttrs`). The title's map is the one exception: its
+  characters are always the same copy, so the converter bakes its slots
+  (`convertTilemap`), which keeps the title's load as long as it was. A pass
+  over the whole map there took a frame and moved the title one frame
+  later. `SampleTile` reads the low byte only.
+- **The window** is BG2, 4bpp, so it cannot share BG3's palettes. It has
+  four of its own, BG palettes 2-5 (CGRAM `$20-$5F`; 6 and 7 are the
+  title's art). A window word's palette is `!HUD_PAL` plus half its tile's
+  slot (`WinAttr`, `BarPut`): the HUD's slots 0, 3 and 7 land in 2, 3 and
+  5. A table from slot to palette was tried and dropped: the status bar is
+  twenty lookups in every vblank, and in the Queen's room that was a lag
+  frame. The status
+  bar's edits (`hud`, `queen`) give every id its own tile's slot, which a
+  test holds, so the engine has no override table.
+- **`mono` and `gbc`** load their one background palette into all eight of
+  BG3's and their HUD palette into all four of the window's, so the slots
+  change nothing they show. `LoadPalette`
+  copies them by DMA (channel 2): from NMI, a CPU loop over 96 bytes
+  pushed the title's badge out of vblank.
+- **Cost.** `MetaPut` reads `!BgAttr` at the id less one, so the byte lands
+  high, and puts the id back under it: some 20 cycles a word more than the
+  old copy. Three heavier versions each cost the gate a lag frame: a
+  stack-based lookup (a warp's strips), a word table rebuilt at each copy
+  (GAME OVER's load, and the frame phase the Queen's cases boot into), and
+  a per-cell lookup for the status bar (her room's vblank).
+- **Spikes.** Every tileset with spikes but one has a slot none of its other
+  background tiles use (its acid tiles, `$FF` and, on the surface,
+  `gfx_surfaceSPR`'s `$BA-$EF` included). `tile_choices` puts its spikes
+  there: `plantBubbles` 1, `ruinsInside` 5, `surface` 1, `lavaCavesA/B/C`
+  2/1/3, `finalLab` 5. `ruinsExt` has none: its acid tiles alone use
+  slot 5 and its other tiles the rest, so its twelve spikes keep their
+  derived slots. Acid tiles (bit 4) are not counted as spikes; they take
+  the acid colour set.
 - **Capacity.** BG uses slots 0-7: at least one tileset (`gfx_ruinsExt`)
-  uses all eight. The window shares the table, so it needs no extra slots.
-  But the HUD's 4bpp palette 1 (CGRAM `$10-$1F`) overlaps BG3 palettes 4-7,
-  so it has to move. Sprites use slots 0-7, which map to SNES OBJ palettes
-  0-7 (CGRAM `$80-$FF`).
+  uses all eight, BG3 palettes 0-7 (CGRAM `$00-$1F`). Sprites use slots 0-7,
+  which map to SNES OBJ palettes 0-7 (CGRAM `$80-$FF`).
 
 ## Decisions
 

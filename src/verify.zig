@@ -1191,8 +1191,8 @@ pub fn main(init: std.process.Init) !void {
                 try out.print("      the sequence      the countdown falls one a frame, she is drawn on three frames in four,\n", .{});
                 try out.print("                        control waits for a button after it is spent, and then she walks\n", .{});
                 try out.print("      no lever          nothing is written to the cart until she walks; the input is Start and a direction\n", .{});
-                try out.print("      the HUD's palette CGRAM $11-$13 made green shows on the status bar's lines alone, and\n", .{});
-                try out.print("                        $01-$03 off them alone: the HUD reads its own slot\n", .{});
+                try out.print("      the HUD's palette the window's four palettes' colours 1-3 made green show on the status bar's\n", .{});
+                try out.print("                        lines alone, and $01-$03 off them alone: the HUD reads its own palettes\n", .{});
 
                 // And the rung is not vacuous. The cheapest fault that reaches
                 // the whole mechanism is in the record rather than in the
@@ -1218,9 +1218,14 @@ pub fn main(init: std.process.Init) !void {
                 // play field's palette (`lda #$00` for `!HUD_ATTR`), as every
                 // window word was before the step. The play field's green
                 // then reaches the status bar's lines, which is code 159.
+                // Colorization Step 6: and `BarPut`'s slot/2 masked off
+                // (`and #$00`), or the digits' slot 7 lands them in palette
+                // 3, one of the window's, and the fault still passes.
                 const attr_at = (snes_inject.symbolOffset("UpdateStatusBar_hudAttr") orelse return error.MissingSymbol) + 1;
+                const mask_at = (snes_inject.symbolOffset("BarPut_slotMask") orelse return error.MissingSymbol) + 1;
                 const hud_fault = try arena.dupe(u8, rom.bytes);
                 hud_fault[attr_at] = 0x00;
+                hud_fault[mask_at] = 0x00;
                 switch (try coldBootTest(init.io, hud_fault, lua.written())) {
                     .sequence => |why| if (std.mem.indexOf(u8, why, "($01-$03)") != null) {
                         try out.print("      fault sweep       the bar's digits on the play field's palette fail the HUD's\n", .{});
@@ -3117,7 +3122,7 @@ fn coldBootTest(io: std.Io, rom: []const u8, lua: []const u8) !ColdTest {
         155 => .{ .sequence = "Samus drew over the ship where its colour is not 0: the start cell's transition word has bit 11, and the Game Boy puts her behind it" },
         156 => .{ .sequence = "Samus's parts covered none of the ship's pixels, or none of hers showed: the behind check graded nothing" },
         157 => .{ .sequence = "no drawn frame followed a blank one in the appearance sequence: the behind check never ran" },
-        158 => .{ .sequence = "the HUD's colours ($11-$13) made green showed nowhere, or off the status bar's lines: the HUD is not on its own palette" },
+        158 => .{ .sequence = "the window palettes' colours 1-3 made green showed nowhere, or off the status bar's lines: the HUD is not on its own palette" },
         159 => .{ .sequence = "the play field's colours ($01-$03) made green showed nowhere, or on the status bar's lines: the two share a palette" },
         colors.lua_off_scheme => .{ .failed = colors.off_scheme_why },
         255 => .{ .failed = "the emulator timed out: the script never reached a verdict" },

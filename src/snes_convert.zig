@@ -47,6 +47,7 @@ const debug_tables = @import("debug_tables.zig");
 const gfx_info = @import("gfx_info.zig");
 const warp = @import("warp.zig");
 const areas = @import("areas.zig");
+const full_slots = @import("full_slots.zig");
 
 pub const Error = error{
     /// A door script names a source address that falls in no offsets entry.
@@ -326,7 +327,7 @@ pub fn convertMetatiles(allocator: std.mem.Allocator, gb: []const u8) ![]u8 {
     const out = try allocator.alloc(u8, n * metatile_bytes);
     errdefer allocator.free(out);
     for (0..n * metatile_words) |i| {
-        const w: u16 = @bitCast(target.playWord(gb[i]));
+        const w: u16 = @bitCast(target.playWord(gb[i], 0));
         out[i * 2] = @truncate(w);
         out[i * 2 + 1] = @truncate(w >> 8);
     }
@@ -364,13 +365,23 @@ pub const title_tilemap = "title_tilemap";
 /// words are BG2's, `target.windowWord`.
 pub const window_tilemap = "bg_queenHead";
 
+/// Where the title's one 4 KiB character copy starts in the ROM: character
+/// `c` is the Game Boy tile 16`c` bytes on (`snes_inject.title_sheets`).
+pub const title_chr_first = "gfx_titleScreen";
+
 pub fn convertTilemap(allocator: std.mem.Allocator, gb: []const u8, name: []const u8) ![]u8 {
     const title = std.mem.eql(u8, name, title_tilemap);
     const window = std.mem.eql(u8, name, window_tilemap);
     const out = try allocator.alloc(u8, gb.len * 2);
     errdefer allocator.free(out);
+    // **The title's words carry their slots** (colorization Step 6): its
+    // characters are always the same copy, so the slot is known here, and
+    // baking it keeps the title's load as long as it was. Every other map
+    // takes slot 0 and the engine ORs the slot in (`CopyAttrs`).
+    const title_at = (offsets.find(title_chr_first) orelse return error.UnresolvedSource).romOffset();
     for (gb, 0..) |id, i| {
-        const w: u16 = @bitCast(if (title) target.titleWord(id) else if (window) target.windowWord(id) else target.playWord(id));
+        const title_slot = full_slots.slotAt(title_at + @as(usize, target.charForTitleId(id)) * 16);
+        const w: u16 = @bitCast(if (title) target.titleWord(id, title_slot) else if (window) target.windowWord(id, 0) else target.playWord(id, 0));
         out[i * 2] = @truncate(w);
         out[i * 2 + 1] = @truncate(w >> 8);
     }
@@ -1004,6 +1015,9 @@ pub const Set = struct {
     title_art: []Blob = &.{},
     /// The debug menu's lists, 1.0 Steps 4 and 5b, in `debug_tables.Which` order.
     debug: []Blob = &.{},
+    /// Every character sheet's palette slots (`full_slots`), colorization
+    /// Step 6: one blob, id 0.
+    slots: Blob = .{ .name = "slots", .bytes = &.{} },
     /// The gfxInfo records `loadGraphics` walks, 1.0 Step 8a, which
     /// `snes_inject` writes into the engine's `GfxInfo` table once each
     /// sheet's asset id is known.
@@ -1029,6 +1043,19 @@ pub const Blob = struct {
     name: []const u8,
     bytes: []u8,
 };
+
+/// The `slots` blob for `assets` (colorization Step 6): each character
+/// sheet's tiles' palette slots, keyed by asset id. See `full_slots`.
+fn slotsBlob(a: std.mem.Allocator, assets: []const Asset) ![]u8 {
+    const sheets = try a.alloc(full_slots.Sheet, assets.len);
+    for (assets, sheets) |s, *out| out.* = .{
+        .id = s.id,
+        .chr = s.kind != .tilemap,
+        .rom_at = s.rom_at,
+        .gb_bytes = s.gb_bytes,
+    };
+    return full_slots.blob(a, sheets);
+}
 
 /// Convert everything, with the crawl `zig build crawl` cached for this ROM.
 /// The returned `Set` owns an arena; `deinit` frees it all.
@@ -1571,6 +1598,7 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
     set.aram = try aramBlobs(a, rom);
     set.title_art = try titleArtBlobs(a);
     set.debug = try debugBlobs(a, rom, walked);
+    set.slots = .{ .name = "slots", .bytes = try slotsBlob(a, set.assets) };
     set.gfx_info = try gfx_info.decode(rom);
 
     return set;
@@ -1648,10 +1676,12 @@ test "metatile conversion round-trips, and refuses a word it did not write" {
     defer gpa.free(back);
     try testing.expectEqualSlices(u8, &gb, back);
 
-    // A word with a palette set is not one this converter produced.
+    // A word without the play field's priority is not one this converter
+    // produced. (Its palette is the tile's slot since colorization Step 6,
+    // which the engine sets, so any palette reads back.)
     var tampered = try gpa.dupe(u8, snes);
     defer gpa.free(tampered);
-    tampered[1] |= 0x04;
+    tampered[1] &= ~@as(u8, 0x20);
     try testing.expectError(Error.RaggedMetatileTable, unconvertMetatiles(gpa, tampered));
     try testing.expectError(Error.RaggedMetatileTable, convertMetatiles(gpa, gb[0..3]));
 }

@@ -219,14 +219,15 @@ pub fn script(allocator: std.mem.Allocator) !Script {
 
 /// After every tick: the twenty tile ids, the OR of the twenty words' high
 /// bytes (the Game Boy has no attribute to carry, so its record holds
-/// `window_attr`, the byte `target.windowWord` gives every window word), both
+/// `window_attr`, the byte `target.windowWord` gives a window word in its
+/// first palette, which the cart's script reads any window palette back as), both
 /// displayed counts, the shuffle timer and the real health's low byte, which
 /// the clamp rewrites.
 pub const record_bytes: usize = status_tiles + 11;
 pub const Record = [record_bytes]u8;
 pub const at_attr: usize = status_tiles;
 /// The high byte of every window word, the palette `target.hud_palette`.
-pub const window_attr: u8 = @truncate(@as(u16, @bitCast(target.windowWord(0))) >> 8);
+pub const window_attr: u8 = @truncate(@as(u16, @bitCast(target.windowWord(0, 0))) >> 8);
 pub const at_disp_health: usize = status_tiles + 1;
 pub const at_disp_missiles: usize = status_tiles + 3;
 pub const at_shuffle: usize = status_tiles + 5;
@@ -365,6 +366,9 @@ pub fn writeLua(w: *std.Io.Writer, s: Script) !void {
         \\local CAMY, CAMX = 0x{X:0>4}, 0x{X:0>4}
         \\local SAMX, FC = 0x{X:0>4}, 0x{X:0>4}
         \\local RB = {d}
+        \\-- A window word's high byte: one of the window's palettes, each slot's
+        \\-- (colorization Step 6), and nothing else. Read back as `WIN`.
+        \\local WIN, WIN_LO, WIN_HI = {d}, {d}, {d}
         \\local POKES = {{
         \\
     , .{
@@ -377,6 +381,7 @@ pub fn writeLua(w: *std.Io.Writer, s: Script) !void {
         try sym("VarCamY") & 0xFFFF,      try sym("VarCamX") & 0xFFFF,
         try sym("VarSamusX") & 0xFFFF,    try sym("VarFrameCount") & 0xFFFF,
         record_bytes,
+        window_attr, target.hud_palette, target.hud_palette + target.window_palettes - 1,
     });
     // Keyed by tick, a list of (address, value) per tick.
     var tick: u16 = 0;
@@ -423,7 +428,10 @@ pub fn writeLua(w: *std.Io.Writer, s: Script) !void {
         \\    local attr = 0
         \\    for k = 0, 19 do
         \\      emu.write(at + k, emu.read(MAP + k * 2, vram), sram)
-        \\      attr = attr | emu.read(MAP + k * 2 + 1, vram)
+        \\      local a = emu.read(MAP + k * 2 + 1, vram)
+        \\      local pal = (a >> 2) & 7
+        \\      if (a & 0xE3) == 0 and pal >= WIN_LO and pal <= WIN_HI then a = WIN end
+        \\      attr = attr | a
         \\    end
         \\    emu.write(at + 20, attr, sram)
         \\    emu.write(at + 21, emu.read(DH, wram), sram)

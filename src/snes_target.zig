@@ -252,13 +252,16 @@ pub const TilemapWord = packed struct(u16) {
     flip_v: bool,
 };
 
-/// Every converted play-field tile uses palette 0 at high priority and no flip.
+/// A play-field word is its tile id at high priority, no flip, and the
+/// palette of its **slot**: the `full` scheme's palette for the ROM tile that
+/// character was last copied from (colorization Step 6, `full_slots`).
 ///
-/// The Game Boy has one background palette register and no per-tile attributes
-/// at all, so there is nothing in the source to carry into these bits. They are
-/// baked at conversion time rather than at runtime so that a later step which
-/// wants per-area colour changes this file and re-runs the converter, instead
-/// of adding an OR to the room loader's inner loop.
+/// The Game Boy has one background palette register and no per-tile
+/// attributes, so the converter bakes slot 0 (`play_palette`) and the engine
+/// ORs each word's slot in as it writes it: which ROM tile a character holds
+/// is only known at run time (`!BgAttr`). `mono` and `gbc` load the same
+/// colours into every palette, so a slot changes nothing they show, and
+/// graders read the id through `tileIdFromWord`, which ignores it.
 ///
 /// **The priority is 1 since Step 24e**, and not for anything in the source.
 /// On some screens the Game Boy draws Samus behind the background's colours 1-3
@@ -271,10 +274,10 @@ pub const play_priority: u1 = 1;
 /// The title's words keep priority 0: nothing is drawn behind it.
 pub const title_priority: u1 = 0;
 
-pub fn playWord(id: u8) TilemapWord {
+pub fn playWord(id: u8, slot: u3) TilemapWord {
     return .{
         .char = @intCast(charForTileId(id)),
-        .palette = play_palette,
+        .palette = slot,
         .priority = play_priority,
         .flip_h = false,
         .flip_v = false,
@@ -300,40 +303,50 @@ pub fn charForTitleId(id: u8) u16 {
     return id +% 0x80;
 }
 
-pub fn titleWord(id: u8) TilemapWord {
+pub fn titleWord(id: u8, slot: u3) TilemapWord {
     return .{
         .char = @intCast(charForTitleId(id)),
-        .palette = play_palette,
+        .palette = slot,
         .priority = title_priority,
         .flip_h = false,
         .flip_v = false,
     };
 }
 
-/// The window's BG2 palette, CGRAM $10-$13, so that a colour scheme can give
-/// the HUD colours of its own. The engine's `!HUD_PAL` is the same number.
-pub const hud_palette: u3 = 1;
+/// The window's first BG2 palette, CGRAM $20-$23, so that a colour scheme can
+/// give the HUD colours of its own. The engine's `!HUD_PAL` is the same
+/// number. 2 since colorization Step 6: palette 1, CGRAM $10-$1F, is BG3's
+/// palettes 4-7, which play-field slots use.
+pub const hud_palette: u3 = 2;
+/// The window's palettes, `hud_palette` on, one per pair of slots: slot `s`
+/// is `hud_palette + s / 2` (the engine's `WinAttr`, `!WIN_PALS`). 6 and 7
+/// are the title's art.
+pub const window_palettes: u3 = 4;
 
 /// A window tile id as a BG2 word: character `id` among the objects' (BG2
-/// reads them, `bg2_char_base`), `hud_palette`, no priority, no flip. The
-/// engine's `HudPut` writes the same word. Priority 0 because the Game Boy
-/// draws every object over the window, and in mode 1 an object at priority 2
-/// goes under a BG2 word that has the bit.
-pub fn windowWord(id: u8) TilemapWord {
-    return .{ .char = id, .palette = hud_palette, .priority = 0, .flip_h = false, .flip_v = false };
+/// reads them, `bg2_char_base`), window palette `offset` past `hud_palette`,
+/// no priority, no flip. The engine's `HudPut` writes the same word, its
+/// offset half the tile's slot (`WinAttr`). Priority 0 because the Game Boy draws every
+/// object over the window, and in mode 1 an object at priority 2 goes under a
+/// BG2 word that has the bit.
+pub fn windowWord(id: u8, offset: u2) TilemapWord {
+    return .{ .char = id, .palette = hud_palette + @as(u3, offset), .priority = 0, .flip_h = false, .flip_v = false };
 }
 
+/// The id of a window word, whichever window palette it is in, or null if
+/// it carries bits the window's words never have.
 pub fn windowIdFromWord(w: TilemapWord) ?u8 {
-    if (w.palette != hud_palette or w.priority != 0 or w.flip_h or w.flip_v or w.char > 0xFF) return null;
+    if (w.palette < hud_palette or w.palette >= hud_palette + window_palettes) return null;
+    if (w.priority != 0 or w.flip_h or w.flip_v or w.char > 0xFF) return null;
     return @intCast(w.char);
 }
 
-/// The tile id a converted word came from, or null if the word carries bits the
-/// converter never sets. Exists so the round-trip can close: recovering the id
-/// from the word is what proves the extra bits are constant rather than
-/// accidentally load-bearing.
+/// The tile id a play-field word came from, or null if the word carries bits
+/// no play-field word has. Exists so the round-trip can close: recovering the
+/// id from the word is what proves the extra bits are constant rather than
+/// accidentally load-bearing. The palette is the tile's slot and any slot is
+/// one (colorization Step 6), so it is not read.
 pub fn tileIdFromWord(w: TilemapWord) ?u8 {
-    if (w.palette != play_palette) return null;
     if (w.priority != play_priority) return null;
     if (w.flip_h or w.flip_v) return null;
     if (w.char > 0xFF) return null;
@@ -345,7 +358,6 @@ pub fn tileIdFromWord(w: TilemapWord) ?u8 {
 /// only closes if `charForTitleId` really is a bijection, which the test beside
 /// it checks directly.
 pub fn titleIdFromWord(w: TilemapWord) ?u8 {
-    if (w.palette != play_palette) return null;
     if (w.priority != title_priority) return null;
     if (w.flip_h or w.flip_v) return null;
     if (w.char > 0xFF) return null;
@@ -413,8 +425,19 @@ test "an unmodelled destination is refused rather than guessed at" {
 test "tilemap words round-trip through the id they were built from" {
     for (0..256) |i| {
         const id: u8 = @intCast(i);
-        const w = playWord(id);
-        try testing.expectEqual(@as(?u8, id), tileIdFromWord(w));
+        for (0..8) |slot| {
+            const w = playWord(id, @intCast(slot));
+            try testing.expectEqual(@as(?u8, id), tileIdFromWord(w));
+            try testing.expectEqual(@as(u3, @intCast(slot)), w.palette);
+            const t = titleWord(id, @intCast(slot));
+            try testing.expectEqual(@as(?u8, id), titleIdFromWord(t));
+            try testing.expectEqual(@as(u3, @intCast(slot)), t.palette);
+        }
+        for (0..window_palettes) |o| {
+            const w = windowWord(id, @intCast(o));
+            try testing.expectEqual(@as(?u8, id), windowIdFromWord(w));
+            try testing.expectEqual(hud_palette + @as(u3, @intCast(o)), w.palette);
+        }
     }
 
     // The bit layout is the hardware's, not ours: char in the low ten bits,
@@ -425,6 +448,8 @@ test "tilemap words round-trip through the id they were built from" {
 
     // A word carrying anything the converter does not set is not ours.
     try testing.expectEqual(@as(?u8, null), tileIdFromWord(.{ .char = 1, .palette = 1, .priority = 0, .flip_h = false, .flip_v = false }));
+    try testing.expectEqual(@as(?u8, null), windowIdFromWord(.{ .char = 1, .palette = 1, .priority = 0, .flip_h = false, .flip_v = false }));
+    try testing.expectEqual(@as(?u8, null), windowIdFromWord(.{ .char = 1, .palette = 6, .priority = 0, .flip_h = false, .flip_v = false }));
     try testing.expectEqual(@as(?u8, null), tileIdFromWord(.{ .char = 1, .palette = 0, .priority = 0, .flip_h = true, .flip_v = false }));
     try testing.expectEqual(@as(?u8, null), tileIdFromWord(.{ .char = 0x300, .palette = 0, .priority = 0, .flip_h = false, .flip_v = false }));
 }

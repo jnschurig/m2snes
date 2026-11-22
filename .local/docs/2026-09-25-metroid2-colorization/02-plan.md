@@ -183,34 +183,61 @@ two other ways:
         differ under colour-0-only tiles; cause in the doc.)
   - [x] Commit: "full: EJRTQ oracle validation and coverage".
 
-- [ ] **Step 6: Per-tile BG and window palettes in the engine**
-  - [ ] WRAM: a 384-byte slot table per Game Boy VRAM tile (`$8000-$97FF`).
+- [x] **Step 6: Per-tile BG and window palettes in the engine**
+  - [x] WRAM: a 384-byte slot table per Game Boy VRAM tile (`$8000-$97FF`).
         Every graphics copy writes its source tiles' slots: `LoadGraphics`
         and its `GfxInfo` rows, the title and credits loaders, door loads,
         and the `GfxXferNmi` queue. The builder emits per-source slot data
         beside the converted CHR. `mono`/`gbc` write zeros.
-  - [ ] Every BG3 writer looks up the slot through signed addressing (ids
+        (Done as `!BgAttr`, 256 bytes per BG3 character, which is what signed
+        addressing reaches; the objects' half is Step 7's. Filled by DMA from
+        the builder's `slots` blob (`src/full_slots.zig`, a new layout class)
+        in `DoCopy`, the title's sheets, the credits' rows and the Samus BG
+        twin. `GfxInfo`/`GfxXferNmi` copy objects only. **Deviation:** the
+        slots are written in every scheme, and `mono`/`gbc` load their one
+        palette into all eight BG3 palettes, so Step 8's L cycle changes
+        CGRAM only.)
+  - [x] Every BG3 writer looks up the slot through signed addressing (ids
         `$80-$FF` → VRAM tile `$80+`, `$00-$7F` → `$100+`) and ORs `slot<<10`
         into the word: `BuildTilemap`,
         `BlockWrite4`, the Queen writers, credits, the title, game over, and
         any writer found by searching for `!PLAY_PRI`/`BG3_MAP`. Check the
         cost of the `BuildTilemap` inner loop against the frame budget.
-  - [ ] HUD: BG2 words take their slot from the same table, with the HUD
+        (Done; the title's map has its slots baked by the converter, since a
+        pass over it moved the title a frame. Cost: a whole-screen build is
+        about 30K cycles more, inside the forced-blank loads.)
+  - [x] HUD: BG2 words take their slot from the same table, with the HUD
         overrides from `full_assign.zig`. Audit CGRAM
         `$20-$6F` first (BG1's room readout and anything else), then move the
         HUD's 4bpp palettes off `$10-$1F` (BG3 slots 4-7) to free palettes
         there.
-  - [ ] Damaging tiles: list the BG tiles the ROM's damage data marks as
+        (Done: `$20-$6F` held only the title's badge (6) and art (7). The
+        window is palettes 2-5, `!HUD_PAL` + slot/2, so the HUD's slots 0, 3
+        and 7 land in 2, 3 and 5; a table cost the Queen's NMI a lag frame.
+        The status bar's edits give every id its own tile's slot (a test), so
+        no override table. `BarPut` reads `!BgAttr` inline, cheap enough for
+        her room's 20 cells a vblank.)
+  - [x] Damaging tiles: list the BG tiles the ROM's damage data marks as
         hurting Samus, per tileset, and give them a slot of their own (an
         override in `full_assign.zig`'s hand-edited section) where the
         tileset has one free. Report the tilesets that don't, for James.
-  - [ ] Zig side: `snes_target.playWord`/`titleWord`/`windowWord` and their
+        (Done: spikes, collision bit 3, in `tile_choices`. Every spiked
+        tileset has a free slot except `ruinsExt`, whose acid tiles alone use
+        slot 5. Acid tiles are not counted as spikes.)
+  - [x] Zig side: `snes_target.playWord`/`titleWord`/`windowWord` and their
         decoders accept a slot. Graders and `SampleTile` ignore the palette
         bits. ROM-free unit tests round-trip each encoder/decoder with
         non-zero slots.
-  - [ ] Verify: `zig build verify` green in `gbc`, with the boot screenshots
+  - [x] Verify: `zig build verify` green in `gbc`, with the boot screenshots
         byte-identical to before.
-  - [ ] Commit: "full: per-tile BG and window palettes".
+        (Green, 50 rungs; re-pinned. Every frame of a power-on, title, new
+        game, walk and jump, against the Step 5 cart with frame skipping off:
+        the title shows a frame later (65 → 66, display-on ~18 lines late),
+        the file select one frame later, and play then runs a frame behind,
+        so a 16-frame BG animation and the walk's first frames differ by
+        that phase. Frames at rest (1500, 2000) are byte-identical, and no
+        colour appears that the old cart doesn't show.)
+  - [x] Commit: "full: per-tile BG and window palettes".
 
 - [ ] **Step 7: Per-sprite OBJ palettes**
   - [ ] OAM conversion (`PutObject` and friends) takes the palette from the

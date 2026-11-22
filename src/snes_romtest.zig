@@ -366,7 +366,7 @@ fn writeGfxDoor(gpa: std.mem.Allocator, w: *std.Io.Writer, di: usize, gb_dest: u
     // `ITEM`; a door without one leaves the row as the door before left it.
     if (name) |n| {
         try w.writeAll(", name = {");
-        for (n) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
+        for (n) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b, 0)))});
         try w.writeAll("}");
     }
     try w.writeAll(" },\n");
@@ -409,11 +409,12 @@ fn writeBar(rom: []const u8, w: *std.Io.Writer) !void {
     if (std.mem.readInt(u16, copy[4..6], .little) != 0x9C20) return error.MissingTable;
     const src = std.mem.readInt(u16, copy[1..3], .little);
     const text = rom[blocks_mod.offsetIn(5, src)..][0..copy[7]];
+    try w.print("HUD.winLo, HUD.winHi = {d}, {d}\n", .{ target.hud_palette, target.hud_palette + target.window_palettes - 1 });
     try w.print("HUD.winY, HUD.wy, HUD.wyUp = {d}, {d}, {d}\nHUD.boot = {{", .{
         @as(u16, @truncate(inject.symbol("VarWinY") orelse return error.MissingSymbol)),
         try blocks_mod.loadAt(rom, 0x580D), try blocks_mod.loadAt(rom, 0x582A),
     });
-    for (text) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b)))});
+    for (text) |b| try w.print("{d},", .{@as(u16, @bitCast(target.windowWord(b, 0)))});
     try w.print("}}\nHUD.font = {{\n", .{});
     const arm = convert.itemArm(rom) orelse return error.NoItemArm;
     const font = rom[blocks_mod.offsetIn(arm.font_bank, arm.font_src)..][0..arm.font_len];
@@ -1668,7 +1669,11 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\  -- station. Words as `target.windowWord` makes them and `HudPut`
         \\  -- writes the first row: the HUD's palette, no priority.
         \\  for i = 0, #HUD.boot - 1 do
-        \\    if rd16(HUD.map + 64 + i * 2, vram) ~= HUD.boot[i + 1] then emu.stop(3) end
+        \\    -- The id, and one of the window's palettes: the tile's slot picks it
+        \\    -- (colorization Step 6).
+        \\    local w = rd16(HUD.map + 64 + i * 2, vram)
+        \\    local pal = (w >> 10) & 7
+        \\    if (w & 0xE3FF) ~= (HUD.boot[i + 1] & 0xE3FF) or pal < HUD.winLo or pal > HUD.winHi then emu.stop(3) end
         \\  end
         \\
         \\  if emu.read(RAM_CELL, wram) ~= CELL then emu.stop(14) end
@@ -4831,7 +4836,9 @@ pub fn write(gpa: std.mem.Allocator, rom: []const u8, set: convert.Set, boot: sc
         \\    -- second row (00:$26A0). A door without `ITEM` leaves it alone.
         \\    ITEMGFX.name = d.name or ITEMGFX.name
         \\    for i = 1, #(ITEMGFX.name or {{}}) do
-        \\      if rd16(HUD.map + 64 + (i - 1) * 2, vram) ~= ITEMGFX.name[i] then emu.stop(3) end
+        \\      local w = rd16(HUD.map + 64 + (i - 1) * 2, vram)
+        \\      local pal = (w >> 10) & 7
+        \\      if (w & 0xE3FF) ~= (ITEMGFX.name[i] & 0xE3FF) or pal < HUD.winLo or pal > HUD.winHi then emu.stop(3) end
         \\    end
         \\    ITEMGFX.at, ITEMGFX.from = ITEMGFX.at + 1, nil
         \\  end
@@ -5078,8 +5085,8 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- 156  her parts covered no pixel of the ship's, or none of hers showed:
         \\--      155 graded nothing
         \\-- 157  no drawn frame followed a blank one in the appearance sequence
-        \\-- 158  the HUD's colours ($11-$13) made green showed nowhere, or not
-        \\--      only on the status bar's lines: the HUD is not on its own palette
+        \\-- 158  the window palettes' colours 1-3 made green showed nowhere, or not
+        \\--      only on the status bar's lines: the HUD is not on its own palettes
         \\-- 159  the play field's ($01-$03) made green showed nowhere, or on the
         \\--      status bar's lines: the play field shares the HUD's palette
         \\
@@ -5104,9 +5111,9 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- Step 24e: the Game Boy's first play row under the status bar, and
         \\-- where the engine keeps BGP, whose low two bits are colour 0's shade.
         \\BEHIND = {{ rows = {d}, bgp = {d}, blank = nil, at = nil, done = false }}
-        \\-- Colour schemes Step 3: the HUD's BG2 palette, as a CGRAM byte offset,
-        \\-- and the play field's, BG3's palette 0.
-        \\PROBE = {{ hud = {d}, play = 0, saved = nil }}
+        \\-- Colour schemes Step 3: the HUD's first BG2 palette, as a CGRAM byte
+        \\-- offset, and how many (the window's), and the play field's, BG3's 0.
+        \\PROBE = {{ hud = {d}, hud_pals = {d}, play = 0, saved = nil }}
         \\
     , .{
         screen.ram.frame_count, screen.ram.pose,      screen.ram.unhandled,
@@ -5119,7 +5126,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         screen.win_left,        screen.band_top,
         try iconBytes(rom, 0),  try iconBytes(rom, 1),
         try engineDefine("!HUD_WY         = $"), try engineDefine("!BgPalette    = $"),
-        @as(u16, target.hud_palette) * 16 * 2,
+        @as(u16, target.hud_palette) * 16 * 2, @as(u16, target.window_palettes),
     });
     try writeSramPrelude(w, &.{});
 
@@ -5189,18 +5196,23 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\-- visible colours are made green, which no palette has, for a frame,
         \\-- and the green pixels counted on the status bar's lines and off them.
         \\-- CGRAM only, and put back after the frame.
-        \\function probePoke(base)
+        \\-- `pals` palettes from `base`, `size` bytes apart: the HUD's are the
+        \\-- window's four (colorization Step 6), the play field's is one.
+        \\function probePoke(base, pals, size)
         \\  PROBE.saved = {{}}
-        \\  for i = 1, 3 do
-        \\    PROBE.saved[i] = rd16(base + i * 2, cgram)
-        \\    emu.write(base + i * 2, 0xE0, cgram)
-        \\    emu.write(base + i * 2 + 1, 0x03, cgram)
+        \\  for p = 0, pals - 1 do
+        \\    for i = 1, 3 do
+        \\      local at = base + p * size + i * 2
+        \\      PROBE.saved[at] = rd16(at, cgram)
+        \\      emu.write(at, 0xE0, cgram)
+        \\      emu.write(at + 1, 0x03, cgram)
+        \\    end
         \\  end
         \\end
-        \\function probeRestore(base)
-        \\  for i = 1, 3 do
-        \\    emu.write(base + i * 2, PROBE.saved[i] & 0xFF, cgram)
-        \\    emu.write(base + i * 2 + 1, PROBE.saved[i] >> 8, cgram)
+        \\function probeRestore()
+        \\  for at, v in pairs(PROBE.saved) do
+        \\    emu.write(at, v & 0xFF, cgram)
+        \\    emu.write(at + 1, v >> 8, cgram)
         \\  end
         \\end
         \\function probeGreen(buf)
@@ -5373,7 +5385,7 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\    -- than a state that merely stopped being pose ${X:0>2}.
         \\    if rd16(RAM_SAMX, wram) ~= startX then
         \\      hold, phase, since = nil, 6, 0
-        \\      probePoke(PROBE.hud)
+        \\      probePoke(PROBE.hud, PROBE.hud_pals, 32)
         \\      return
         \\    end
         \\    if since > 120 then emu.stop(149) end
@@ -5384,16 +5396,16 @@ pub fn writeColdBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot,
         \\  -- play field's. Each palette reaches its own lines and no others.
         \\  local bar, rest = probeGreen(emu.getScreenBuffer())
         \\  if phase == 6 then
-        \\    probeRestore(PROBE.hud)
+        \\    probeRestore()
         \\    if bar == 0 or rest ~= 0 then
         \\      emu.stop(158)
         \\      return
         \\    end
-        \\    probePoke(PROBE.play)
+        \\    probePoke(PROBE.play, 1, 8)
         \\    phase = 7
         \\    return
         \\  end
-        \\  probeRestore(PROBE.play)
+        \\  probeRestore()
         \\  if rest == 0 or bar ~= 0 then emu.stop(159) else emu.stop(0) end
         \\end, emu.eventType.endFrame)
         \\
@@ -5829,7 +5841,8 @@ pub fn writeDeathBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot
         \\    local want = 0x7F
         \\    local o = i * 2 - TEXT_AT
         \\    if o >= 0 and o < n * 2 then want = (TEXT[o // 2 + 1] + 0x80) & 0xFF end
-        \\    if rd16(0x1000 + i * 2, vram) ~= want then return false end
+        \\    -- The character only: the palette is the tile's slot (colorization Step 6).
+        \\    if (rd16(0x1000 + i * 2, vram) & 0xE3FF) ~= want then return false end
         \\  end
         \\  return emu.read(R.bands + BAND_HUD, wram) == TM_PLAY
         \\end

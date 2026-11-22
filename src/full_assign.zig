@@ -393,3 +393,30 @@ pub const queen_choices = [_]Choice{
 /// energy tank) at the tank columns. Where it keeps $AF, $AF is in slot 3,
 /// as it is in the source-tile table.
 const af_why = "the blank's own slot; EJRTQ's other ids at $AF positions are digit placeholders and its empty-tank glyph";
+
+/// A hand choice for tiles of one region (`regions`), with the reason:
+/// they are drawn in `slot` whatever the derived slot says.
+pub const TileChoice = struct { region: []const u8, tiles: []const u8, slot: u3, why: []const u8 };
+
+/// Spikes, the tiles a tileset's collision table marks as hurting Samus
+/// (bit 3, `00:$2021`), each tileset's in a slot no other background tile
+/// of it uses, so the `full` scheme can draw them red (colorization F3).
+/// The tile is the id: a tileset's graphics land at `$9000`, ids `$00-$7F`.
+/// Free means unused by the tileset's other tiles, by its acid tiles, by
+/// `$FF` (the only common item tile the background shows) and, on the
+/// surface, by `gfx_surfaceSPR`'s tiles `$BA-$EF` its metatiles draw.
+/// `full_slots`' tests hold every claim here against the ROM.
+///
+/// `ruinsExt` has none free: its acid tiles alone use slot 5, and the rest
+/// use the other seven. Its spikes keep their derived slots.
+pub const tile_choices = [_]TileChoice{
+    .{ .region = "gfx_plantBubbles", .tiles = &.{ 0x1C, 0x1D, 0x1E, 0x1F, 0x26, 0x27, 0x28, 0x29, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x61, 0x62 }, .slot = 1, .why = spike_why },
+    .{ .region = "gfx_ruinsInside", .tiles = &.{ 0x15, 0x16, 0x19, 0x1A }, .slot = 5, .why = spike_why },
+    .{ .region = "gfx_surfaceBG", .tiles = &.{ 0x59, 0x5A, 0x5B, 0x5E, 0x60, 0x61, 0x62, 0x63 }, .slot = 1, .why = spike_why },
+    .{ .region = "gfx_lavaCavesA", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 2, .why = spike_why },
+    .{ .region = "gfx_lavaCavesB", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 1, .why = spike_why },
+    .{ .region = "gfx_lavaCavesC", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 3, .why = spike_why },
+    .{ .region = "gfx_finalLab", .tiles = &.{ 0x3A, 0x42, 0x43, 0x6B }, .slot = 5, .why = spike_why },
+};
+
+const spike_why = "a spike: its own slot, so the full scheme can draw it red";

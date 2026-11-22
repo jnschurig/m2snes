@@ -441,6 +441,7 @@ fn collect(gpa: std.mem.Allocator, set: convert.Set) !std.ArrayList(Source) {
     try appendBlobs(gpa, &list, .aram, set.aram);
     try appendBlobs(gpa, &list, .title_art, set.title_art);
     try appendBlobs(gpa, &list, .debug, set.debug);
+    try appendBlobs(gpa, &list, .slots, &.{set.slots});
     return list;
 }
 
@@ -1809,6 +1810,7 @@ test "the engine's debug-table constants are debug_tables'" {
     // entries by size; each is a hand-written mirror.
     const dt = @import("debug_tables.zig");
     try testing.expectEqual(@as(u32, @intFromEnum(layout.Class.debug)), symbol("ConstClassDebug").?);
+    try testing.expectEqual(@as(u32, @intFromEnum(layout.Class.slots)), symbol("ConstClassSlots").?);
     try testing.expectEqual(@as(u32, @intFromEnum(dt.Which.metroids)), symbol("ConstDebugBlobMetroids").?);
     try testing.expectEqual(@as(u32, dt.queen_bank), symbol("ConstDebugQueenBank").?);
     try testing.expectEqual(@as(u32, @intFromEnum(dt.Which.larvae)), symbol("ConstDebugBlobLarvae").?);

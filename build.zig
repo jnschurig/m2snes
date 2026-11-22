@@ -522,6 +522,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // The cart's per-sheet palette slots (colorization Step 6).
+    const full_slots_mod = b.createModule(.{
+        .root_source_file = b.path("src/full_slots.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    full_slots_mod.addOptions("build_options", options);
+    full_slots_mod.addImport("testrom", testrom_mod);
     // Its coverage pass (Step 5): the recording through Mesen.
     const full_ref_cover_mod = b.createModule(.{
         .root_source_file = b.path("src/full_ref_cover.zig"),
@@ -843,7 +851,7 @@ pub fn build(b: *std.Build) void {
         run.has_side_effects = true;
         test_step.dependOn(&run.step);
     }
-    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod, ips_mod, full_ref_mod, full_ref_cgb_mod }) |mod| {
+    for ([_]*std.Build.Module{ rom_mod, policy_mod, pin_mod, gitblob_mod, offsets_mod, gfx_mod, tileset_mod, physics_mod, map_mod, door_mod, entity_mod, extract_mod, roundtrip_mod, coverage_mod, png_mod, screens_mod, wav_mod, ips_mod, full_ref_mod, full_ref_cgb_mod, full_slots_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const run = b.addRunArtifact(t);
         run.step.dependOn(&crawl_run.step);

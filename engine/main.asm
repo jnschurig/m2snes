@@ -94,6 +94,16 @@ arch 65816
 !A1T0L    = $4302
 !A1B0     = $4304
 !DAS0L    = $4305
+!DMAP1    = $4310             ; colorization Step 6: `SlotFill`'s, WRAM bound
+!BBAD1    = $4311
+!A1T1L    = $4312
+!A1B1     = $4314
+!DAS1L    = $4315
+!DMAP2    = $4320             ; and `LoadPalette`'s, CGRAM bound
+!BBAD2    = $4321
+!A1T2L    = $4322
+!A1B2     = $4324
+!DAS2L    = $4325
 !DMAP3    = $4330
 !BBAD3    = $4331
 !A1T3L    = $4332
@@ -144,10 +154,14 @@ arch 65816
 !BG3SC_VALUE   = (!BG3_MAP>>10)<<2
 !BG2_MAP       = $0C00
 !BG2SC_VALUE   = (!BG2_MAP>>10)<<2
-; The window's BG2 palette, CGRAM $10-$13, so a colour scheme can give the HUD
-; colours of its own (`snes_target.hud_palette`). `!HUD_ATTR` is the high byte
-; of every window word: the palette, no priority, no flip.
-!HUD_PAL       = 1
+; The window's first BG2 palette, CGRAM $20-$23, so a colour scheme can give the
+; HUD colours of its own (`snes_target.hud_palette`). Palette 2 since
+; colorization Step 6: 1, CGRAM $10-$1F, is BG3's palettes 4-7, which per-tile
+; slots use. `!HUD_ATTR` is the high byte of a window word in slot 0 or 1: the
+; palette, no priority, no flip. The window has `!WIN_PALS` palettes, 2-5, one
+; per pair of slots (`WinAttr`); 6 and 7 are the title's art.
+!HUD_PAL       = 2
+!WIN_PALS      = 4
 !HUD_ATTR      = !HUD_PAL<<2
 ; The colour schemes `SchemeTable` holds (`colors.count`), the one fresh SRAM
 ; and every boot that skips the title get (`colors.default_scheme`), and the
@@ -426,6 +440,7 @@ assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
 !CLASS_ARAM        = 14
 !CLASS_TITLE_ART   = 15
 !CLASS_DEBUG       = 16
+!CLASS_SLOTS       = 17
 
 ; Blob ids within !CLASS_DEBUG, mirrored from `src/debug_tables.zig` (1.0 Step
 ; 4): the METROIDS and FLAGS lists. A count byte, then per entry the map bank,
@@ -3230,6 +3245,8 @@ assert !QmScrollY-!QbScrollY == !QM_OFS
 ; unused.
 !QueenChrBg   = $7F0000         ; $A60: BG3's, the Game Boy's $8B10-$956F in its order
 !QueenChrObj  = $7F1000         ; $A00: the objects' 4bpp tiles $B0-$FF, BG2's too
+; A tilemap copy's words with their palettes, before they go up (`DoCopy`).
+!TmStage      = $7F2200         ; $800: one 32x32 map
 !QUEEN_CHR_BG_N = $9570-$8B10
 !QUEEN_CHR_OBJ_TILE = $B0
 !QUEEN_CHR_OBJ_N = ($100-!QUEEN_CHR_OBJ_TILE)*32
@@ -3244,6 +3261,12 @@ assert !QmScrollY-!QbScrollY == !QM_OFS
 !QueenWin     = $1780
 !QUEEN_WIN_B  = $40
 assert !QueenWin+(2*!QUEEN_WIN_B) <= $1800
+; Colorization Step 6. Per BG3 character, the high byte of a play-field word
+; showing it: `!PLAY_PRI` and the palette of the Game Boy tile last copied
+; there (`full_slots.attr`). Every copy into BG3's characters writes it by DMA
+; (`SlotFill`); every play-field word takes it. Absolute, below the stack (which
+; keeps $1900-$1FFF), because `MetaPut` reads it on every strip.
+!BgAttr       = $001800         ; 256
 ; 1.0 Step 19c: BGP mid-frame, as two tables of the TM table's shape, written at
 ; its offsets: INIDISP on channel 4, and COLDATA on channel 3. See `QueenApply`.
 !QueenDisp    = $7E3400
@@ -3568,6 +3591,15 @@ ConstCollBlobs = !COLL_BLOBS
 !SchemeSlot   = $07A4           ; the slot the title last loaded a scheme for
 !SlotGame     = $07A5           ; 3: nonzero while the slot holds a game (`SlotIsGame`)
 !BadgeMap     = $07A8           ; 3: the L badge's map blob, for `BadgeShow` in NMI
+; Colorization Step 6: per-tile palettes, `SlotFill`'s arguments and the
+; window's palette per slot.
+!SlFirst      = $07AB           ; 2: the first Game Boy tile of the sheet copied
+!SlDest       = $07AD           ; 2: the BG3 character it lands on
+!SlCount      = $07AF           ; 2: how many
+!SlId         = $07B1           ; the sheet's asset id
+!HudBg3       = $07B2           ; $80 while the status bar is BG3's (her room), 0 the window's
+!SlBlob       = $07BA           ; 5: `!Blob` and `!BlobLen`, kept across `SlotFill`
+!TmUsed       = $07BF           ; 2: bytes of `!TmStage` the queued copies hold
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -4134,6 +4166,7 @@ ConstBadgeMapAt  = !BADGE_MAP_AT
 ConstBadgeCols   = !BADGE_COLS
 ConstBadgeRows   = !BADGE_ROWS
 ConstClassDebug = !CLASS_DEBUG
+ConstClassSlots = !CLASS_SLOTS
 ConstDebugBlobMetroids = !DEBUG_BLOB_METROIDS
 ConstDebugQueenBank = !DEBUG_QUEEN_BANK
 ConstDebugBlobFlags = !DEBUG_BLOB_FLAGS
@@ -4423,6 +4456,7 @@ Reset:
         jsr ApplySetup
         jsr InitHdma
         jsl LoadDefaultPalette  ; bank 1
+        jsl SlotInit            ; colorization Step 6, bank 1
         ; **`InitOam` moved in front of `InitState` in Step 7**, because the
         ; title screen is shown between them and a screen with 128 unparked
         ; sprites on it is a screen with a row of stray tiles across the top.
@@ -5615,6 +5649,7 @@ UploadTitleChr:
         lda.b #$01
         sta !MDMAEN
         rep #$30
+        jsl TitleSlots          ; colorization Step 6: its slots, in bank 1
         lda !BlobLen
         lsr a                   ; VMADD counts words; the blob is bytes
         clc
@@ -5695,6 +5730,8 @@ TitleScreen:
         lda.b #$01
         sta !MDMAEN
         rep #$30
+        ; Its words carry their slots already (colorization Step 6,
+        ; `snes_convert.convertTilemap`): the title's characters are fixed.
         jsr UploadTilemap
 
 ; ---- Where it is shown ----------------------------------------------------
@@ -7710,6 +7747,7 @@ DoCopy:
         jmp Fatal
 +       lda !Tmp
         jsr BlobOffset          ; !Src = the asset, plus the operand's offset
+        jsl CopyAttrs           ; colorization Step 6: slots, and a map's palettes
 
         ; **On a live crossing the copy waits for vblank** (Step 24b). The door
         ; interpreter runs from `MainLoop`, which starts some sixteen lines
@@ -7957,18 +7995,7 @@ BuildTilemap:
         asl a
         asl a                   ; eight bytes per metatile
         jsr MetaOffset
-        ldy.w #$0000
-        lda [!Src],y
-        sta.w !TilemapBuf,x
-        ldy.w #$0002
-        lda [!Src],y
-        sta.w !TilemapBuf+2,x
-        ldy.w #$0004
-        lda [!Src],y
-        sta.w !TilemapBuf+64,x  ; the next tile row down, 32 words on
-        ldy.w #$0006
-        lda [!Src],y
-        sta.w !TilemapBuf+66,x
+        jsl MetaPut             ; the four words, with their palettes (bank 1)
         inc !BodyIdx
         inx
         inx
@@ -7988,6 +8015,7 @@ BlankTilemap:
         rep #$30
         ldx.w #$0000
         lda.w #!PLAY_PRI        ; tile 0, as a play-field word
+        jsl PlayAttrW
 -       sta.w !TilemapBuf,x
         inx
         inx
@@ -12081,6 +12109,7 @@ SeedWorld:
         sep #$20
         lda.l BootWorld+2,x     ; and the tile id to force
         sta.w !TilemapBuf,y
+        jsl PlayAttrAtY         ; and its palette with it
         rep #$30
         txa
         clc
@@ -12153,18 +12182,7 @@ StreamOne:
         clc
         adc !StreamDest
         tax
-        ldy.w #$0000
-        lda [!Src],y
-        sta.w !TilemapBuf,x
-        ldy.w #$0002
-        lda [!Src],y
-        sta.w !TilemapBuf+2,x
-        ldy.w #$0004
-        lda [!Src],y
-        sta.w !TilemapBuf+64,x  ; the next tile row down, 32 words on
-        ldy.w #$0006
-        lda [!Src],y
-        sta.w !TilemapBuf+66,x
+        jsl MetaPut             ; the four words, with their palettes (bank 1)
         rep #$30
         rts
 .skip
@@ -20088,7 +20106,7 @@ PoseBombed:
 ; it will fault in an emulator instead of quietly reading bank 0.
 ; ===========================================================================
 !REGION_VERSION     = 1
-!REGION_CLASSES     = 17        ; snes_layout.Class, including `directory`
+!REGION_CLASSES     = 18        ; snes_layout.Class, including `directory`
 !REGION_ENTRY_BYTES = 8
 !BOOT_VERSION       = 18
 !TILE_TABLES        = 10        ; screens.tiletable_order
@@ -20483,33 +20501,16 @@ BlockSlotAddr:
 ; INC A / LD (HL+),A / INC A / LD (HL),A` -- so they are one routine here and
 ; the immediate is the argument.
 ;
-; The word written is the id with `!PLAY_PRI` over it, which is
-; `snes_target.playWord` exactly: palette 0, priority 1, neither flip. A block
-; drawn here and a metatile expanded by `BuildTilemap` therefore mean the same
-; thing by a tile id, which is what lets `SampleTile` read either.
+; The word written is the id with `!PLAY_PRI` over it and its character's
+; palette, which is `snes_target.playWord` exactly: the slot, priority 1, neither
+; flip. A block drawn here and a metatile expanded by `BuildTilemap` therefore
+; mean the same thing by a tile id, which is what lets `SampleTile` read either.
+; In bank 1 since colorization Step 6 (`BlockWrite4L`).
 ;
 ; in: A (8-bit) the base id, !BlkDst the slot
 ; ---------------------------------------------------------------------------
 BlockWrite4:
-        rep #$30
-        and.w #$00FF
-        ora.w #!PLAY_PRI
-        pha
-        lda !BlkDst
-        asl a                   ; a word index, and the buffer is two bytes a slot
-        tax
-        pla
-        sta.w !TilemapBuf,x
-        inc a
-        sta.w !TilemapBuf+2,x
-        inc a
-        sta.w !TilemapBuf+64,x  ; the next tile row down, 32 words on
-        inc a
-        sta.w !TilemapBuf+66,x
-        sep #$20
-        lda.b #$01
-        sta !Redraw
-        rep #$30
+        jsl BlockWrite4L
         rts
 
 ; ---------------------------------------------------------------------------
@@ -20526,6 +20527,7 @@ DestroyBlock:
         asl a
         tax
         lda.w #!BLK_TILE_GONE|!PLAY_PRI ; $5705
+        jsl PlayAttrW
         sta.w !TilemapBuf,x     ; $5707
         sta.w !TilemapBuf+2,x   ; $5708
         sta.w !TilemapBuf+64,x  ; $570A
@@ -23144,17 +23146,35 @@ LoadHud:
 ; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
 HudPut:
         sta !VMDATAL
-        lda.b #!HUD_ATTR
+        jsl WinAttr
         sta !VMDATAL+1
         rts
 
-; The status bar's cell: `HudPut`, but with `!HudAttr`'s high byte, which
-; `UpdateStatusBar` sets with `!HudBase`. In the Queen's room the bar is a row
-; of BG3's (`vramDest_queenStatusBar`), which is the play field's palette 0.
-; in: 8-bit A, VMADD already pointed. Preserves X and Y, not A.
+; The status bar's cell: `HudPut`, but from `!HudAttr`, which `UpdateStatusBar`
+; sets with `!HudBase`: the id's window palette (`WinAttr`) over it. In the
+; Queen's room the bar is a row of BG3's (`vramDest_queenStatusBar`, `!HudBg3`),
+; in the id's own palette and no priority. Inline rather than `BarAttr` because
+; it runs twenty times in every vblank, and in her room's that was a lag frame.
+; in: 8-bit A, 16-bit index, VMADD already pointed. Preserves X and Y, not A.
 BarPut:
         sta !VMDATAL
-        lda.w !HudAttr
+        phx
+        sep #$10
+        tax
+        lda.l !BgAttr,x
+        rep #$10
+        plx
+        bit.w !HudBg3
+        bmi .bg3
+        lsr a                   ; slot / 2, as palette bits
+.slotMask                               ; the cold boot rung's fault patches this
+        and.b #$0C
+        clc
+        adc.w !HudAttr
+        sta !VMDATAL+1
+        rts
+.bg3
+        and.b #$1C              ; the slot; no priority
         sta !VMDATAL+1
         rts
 
@@ -23353,9 +23373,12 @@ UpdateStatusBar:
         sta.w !HudBase
         sep #$20
         stz.w !HudAttr
+        lda.b #$80
+        sta.w !HudBg3           ; colorization Step 6: `BarPut`'s
         lda !RoomMode
         cmp.b #!QUEEN_ROOM      ; $4983
         beq +
+        stz.w !HudBg3
 .hudAttr                                ; the cold boot rung's fault patches this
         lda.b #!HUD_ATTR
         sta.w !HudAttr
@@ -27975,24 +27998,24 @@ StatusBarLCounter:
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        lda.w !HudAttr
+        jsl BarAttr
         sta !VMDATAL+1
         lda.w !LCounter                 ; $4A1D: the ones
         and.b #$0F
         clc
         adc.b #!HUD_DIGIT
         sta !VMDATAL
-        lda.w !HudAttr
+        jsl BarAttr
         sta !VMDATAL+1
         rtl
 .dashes
         lda.b #!HUD_DASH                ; $4A26
         sta !VMDATAL
-        lda.w !HudAttr
+        jsl BarAttr
         sta !VMDATAL+1
         lda.b #!HUD_DASH
         sta !VMDATAL
-        lda.w !HudAttr
+        jsl BarAttr
         sta !VMDATAL+1
         rtl
 
@@ -28291,7 +28314,7 @@ HudBaseNmi:
         ldx.w #$0000
 -       lda.w !HudBaseBuf,x
         sta !VMDATAL
-        lda.b #!HUD_ATTR
+        jsl WinAttr
         sta !VMDATAL+1
         inx
         cpx.w #!HUD_CELLS
@@ -28605,8 +28628,12 @@ QueenMissileHurt:
 QueenCloseFloor:
         rep #$20
         lda.w #!QUEEN_FLOOR_TILE|!PLAY_PRI ; $7AB2
+        pha
+        jsl PlayAttrW
         sta.w !TilemapBuf+(2*!QUEEN_FLOOR_CELL)
+        pla
         inc a                           ; $7ABC, the next id
+        jsl PlayAttrW
         sta.w !TilemapBuf+(2*!QUEEN_FLOOR_CELL)+2
         sep #$20
         lda.b #$01
@@ -30256,6 +30283,7 @@ QueenDeleteBody:
         tax
         ldy.w #!QUEEN_BODY_ROW_W        ; $7BA5 B
         lda.w #!QUEEN_BODY_TILE|!PLAY_PRI ; $7BAE
+        jsl PlayAttrW
 -       sta.w !TilemapBuf,x
         inx
         inx
@@ -30998,6 +31026,7 @@ QueenDrawFeet:
         lda.w !QueenFeet,x              ; $70A9
         and.w #$00FF
         ora.w #!PLAY_PRI
+        jsl PlayAttrW
         sta !VMDATAL                    ; $70AA
         pha
         lda.w !QnTmp
@@ -31063,8 +31092,8 @@ QueenDrawHead:
         lda.b #$06                      ; $703D: six cells
         sta.w !QnRun
 -       lda.w !QueenFrames,x            ; $703F
-        sta !VMDATAL                    ; a window word: the id, and `!HUD_ATTR`
-        lda.b #!HUD_ATTR
+        sta !VMDATAL                    ; a window word: the id, and its palette
+        jsl WinAttr
         sta !VMDATAH
         inx
         dec.w !QnRun
@@ -31501,6 +31530,17 @@ UploadSamusBgTwin:
         tay
         cpy.w #(!SAMUS_TWIN_LAST+1)*32
         bne -
+        ; Colorization Step 6: and their slots, the sheet's own.
+        sep #$20
+        lda.l BootSamusChr
+        sta.w !SlId
+        rep #$20
+        lda.w #!SAMUS_TWIN_FIRST
+        sta.w !SlFirst
+        sta.w !SlDest
+        lda.w #!SAMUS_TWIN_LAST-!SAMUS_TWIN_FIRST+1
+        sta.w !SlCount
+        jsl SlotFill
         plp
         rtl
 
@@ -31540,24 +31580,38 @@ LoadPalette:
         asl
         asl                             ; !SCHEME_WORDS*2 bytes a scheme
         tax
+        ; Colorization Step 6: a play-field word carries its tile's slot, so
+        ; the background's four colours go into all eight of BG3's palettes,
+        ; and the window's into all `!WIN_PALS` of its own. A scheme with one
+        ; palette a layer shows what it showed before slots.
         sep #$20
         stz !CGADD
-        ldy.w #$0008
--       lda.l SchemeTable,x
-        sta !CGDATA
-        inx
-        dey
-        bne -
-        ; The window's, BG2 palette `!HUD_PAL`. Entry 0 is BG2's transparent
-        ; colour, written for the same reason the objects' is.
+        lda.b #8
+        jsr .four               ; BG3's palettes 0-7, CGRAM $00-$1F
+        rep #$20
+        txa
+        clc
+        adc.w #8                ; past the background's four
+        tax
+        sep #$20
+        ; The window's, BG2 palettes `!HUD_PAL` on. Entry 0 is BG2's
+        ; transparent colour, written for the same reason the objects' is.
         lda.b #!HUD_PAL<<4
-        sta !CGADD
-        ldy.w #$0008
--       lda.l SchemeTable,x
-        sta !CGDATA
-        inx
-        dey
+-       sta !CGADD
+        pha
+        lda.b #1
+        jsr .four
+        pla
+        clc
+        adc.b #16
+        cmp.b #(!HUD_PAL+!WIN_PALS)<<4
         bne -
+        rep #$20
+        txa
+        clc
+        adc.w #8                ; past the window's four
+        tax
+        sep #$20
         ; The object palettes. CGRAM's second half belongs to the sprites: the
         ; first of their eight palettes starts at colour $80, and OBP0 and OBP1
         ; go into it and the one after. Entry 0 of each is written and never
@@ -31592,6 +31646,37 @@ LoadPalette:
         bne -
         plp
         rtl
+; The four colours at `SchemeTable`+X into CGRAM, A times over, by DMA on
+; channel 2 (nothing else uses it): in NMI the CPU's loop took long enough to
+; push `BadgeShow` out of vblank. 8-bit A, 16-bit index; keeps X and Y.
+.four
+        pha
+        stz !DMAP2              ; one register, incrementing source
+        lda.b #!CGDATA&$FF
+        sta !BBAD2
+        lda.b #SchemeTable>>16
+        sta !A1B2
+        rep #$20
+        txa
+        clc
+        adc.w #SchemeTable
+        pha                     ; the source: 1,s; the count: 3,s
+-       lda 1,s
+        sta !A1T2L
+        lda.w #8
+        sta !DAS2L
+        sep #$20
+        lda.b #$04
+        sta !MDMAEN
+        lda 3,s
+        dec a
+        sta 3,s
+        rep #$20
+        bne -
+        pla
+        sep #$20
+        pla
+        rts
 
 ; The window's map to $FF, as `bootRoutine`'s `clearTilemaps` (00:$01FB) and
 ; `gameMode_dead`'s leave the Game Boy's $9C00: the rows the status bar, the
@@ -31607,7 +31692,12 @@ ClearWindowMap:
         lda.w #!BG2_MAP
         sta !VMADDL
         ldx.w #$0400
-        lda.w #(!HUD_ATTR<<8)|$FF
+        sep #$20
+        lda.b #$FF
+        jsl WinAttr             ; $FF's palette (colorization Step 6)
+        xba
+        lda.b #$FF
+        rep #$20
 -       sta !VMDATAL
         dex
         bne -
@@ -38473,7 +38563,12 @@ GameOverScreen:
         ; character is id + $80, palette and priority zero.
         rep #$30
         ldx.w #$0000
-        lda.w #(!GAME_OVER_CLEAR+$80)&$FF
+        sep #$20
+        lda.b #(!GAME_OVER_CLEAR+$80)&$FF
+        jsl CharAttr            ; its palette (colorization Step 6)
+        xba
+        lda.b #(!GAME_OVER_CLEAR+$80)&$FF
+        rep #$20
 -       sta.w !TilemapBuf,x
         inx
         inx
@@ -38490,7 +38585,8 @@ GameOverScreen:
         clc
         adc.b #$80
         sta.w !TilemapBuf,x
-        stz.w !TilemapBuf+1,x
+        jsl CharAttr            ; and its palette (colorization Step 6)
+        sta.w !TilemapBuf+1,x
         inx
         inx
         iny
@@ -38624,6 +38720,7 @@ CreditsSetup:
         rep #$30
         ldx.w #$0000
         lda.w #((!CREDITS_BLANK_ID+$80)&$FF)|!PLAY_PRI
+        jsl PlayAttrW           ; colour 0 throughout, so any palette (Step 6)
 -       sta.w !TilemapBuf,x
         inx
         inx
@@ -38754,7 +38851,32 @@ CreditsChrRow:
         sep #$20
         lda.b #$01
         sta !MDMAEN
-        rep #$30
+        ; Colorization Step 6: a background row writes its characters' slots.
+        lda !ArgClass
+        cmp.b #!CLASS_CHR_BG
+        bne +
+        lda !ArgId
+        sta.w !SlId
+        rep #$20
+        lda.l CreditsChrRows+2,x        ; 2bpp: sixteen bytes a tile
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlFirst
+        lda.l CreditsChrRows+4,x        ; eight words a character, from 0
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlDest
+        lda.l CreditsChrRows+6,x
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlCount
+        jsl SlotFill
++       rep #$30
         rts
 
 ; The ids of the credits' sheets, by `snes_inject` from their names: the
@@ -38916,7 +39038,8 @@ CreditsLineNmi:
         clc
         adc.b #$80                      ; the signed window's rotation
         sta !VMDATAL
-        lda.b #!PLAY_PRI>>8
+        jsl CharAttr                    ; its palette (colorization Step 6)
+        ora.b #!PLAY_PRI>>8
         sta !VMDATAH
         dey
         bne -
@@ -38924,7 +39047,8 @@ CreditsLineNmi:
 .blank
         lda.b #(!CREDITS_BLANK_ID+$80)&$FF      ; $406C `LD A,$FF`
         sta !VMDATAL
-        lda.b #!PLAY_PRI>>8
+        jsl CharAttr
+        ora.b #!PLAY_PRI>>8
         sta !VMDATAH
         dey
         bne .blank
@@ -39316,6 +39440,391 @@ CrdBareG:      db $18,$0F,$10,!CRD_END
 CrdBareH:      db $19,$0F,$10,!CRD_END
 CrdWaveA:     db $18,$0F,$10,!CRD_END                     ; $13-$14, in the wind
 CrdWaveB:     db $1A,$0F,$10,!CRD_END
+
+; ===========================================================================
+; Colorization Step 6: per-tile palettes.
+;
+; The Game Boy Color colours a background tile by its map attribute, and the
+; `full` scheme's reference sets that from the ROM tile the character was last
+; copied from (`docs/colorization.md`). Here each BG3 character keeps that
+; slot in `!BgAttr`: every copy into BG3's characters writes it (`SlotFill`,
+; from the builder's `slots` blob, `full_slots.zig`), and every tilemap word
+; takes its character's (`PlayAttrW`, `WinAttr`). `mono` and `gbc` load one
+; palette into all eight (`LoadPalette`), so the bits change nothing they show.
+; ===========================================================================
+
+; `!BgAttr`'s byte for the word in A, ORed into it: 16-bit A and X, keeps X
+; and Y. Stack only, so NMI may use it too.
+macro attr_w()
+        phx
+        pha
+        and.w #$00FF
+        tax
+        lda.l !BgAttr,x
+        and.w #$00FF
+        xba
+        ora 1,s
+        plx                     ; the word pushed, dropped
+        plx
+endmacro
+
+; A play-field word with its character's palette: a word whose palette bits
+; are clear in 16-bit A, and out with them set. Keeps X, Y and the widths.
+PlayAttrW:
+        php
+        rep #$30
+        %attr_w()
+        plp
+        rtl
+
+; BG3's palette bits for character A: 8-bit A in and out. Keeps X, Y and the
+; widths. For the byte-wide writers (the credits' rows).
+CharAttr:
+        php
+        rep #$30
+        phx
+        and.w #$00FF
+        tax
+        lda.l !BgAttr,x
+        and.w #$001C            ; the palette alone: no priority
+        plx
+        plp
+        rtl
+
+; A window word's high byte for id A: window palette `!HUD_PAL` + slot/2,
+; no priority. BG2 reads the objects' characters, which are BG3's $80-$FF, so
+; the slot is `!BgAttr`'s. 8-bit A in and out; keeps X, Y and the widths.
+WinAttr:
+        php
+        rep #$30
+        phx
+        and.w #$00FF
+        tax
+        lda.l !BgAttr,x
+        lsr a
+        and.w #$000C
+        clc
+        adc.w #!HUD_ATTR
+        plx
+        plp
+        rtl
+
+; A status bar cell's high byte for id A, `BarPut`'s, for the paused L
+; counter in bank 1. 8-bit A in and out; keeps X, Y and the widths.
+BarAttr:
+        php
+        rep #$30
+        phx
+        and.w #$00FF
+        tax
+        sep #$20
+        lda.l !BgAttr,x
+        bit.w !HudBg3
+        bmi .bg3
+        lsr a
+        and.b #$0C
+        clc
+        adc.w !HudAttr
+        bra .out
+.bg3
+        and.b #$1C
+.out
+        rep #$10
+        plx
+        plp
+        rtl
+
+; The metatile at [!Src] into `!TilemapBuf` at X, each of its four words with
+; its character's palette: `BuildTilemap`'s and `StreamOne`'s copy. A converted
+; metatile word is its id and `!PLAY_PRI` and nothing else (`playWord(id, 0)`),
+; so the word is the id under `!BgAttr[id]`, which holds the priority too. Read
+; at `!BgAttr-1` so the byte lands high, and the id put back under it; 16-bit
+; A, X and Y; keeps X, not Y.
+macro meta_word(src, dst)
+        ldy.w #<src>
+        lda [!Src],y
+        and.w #$00FF
+        tay
+        lda.w !BgAttr-1,y
+        sep #$20
+        tya                     ; the id, the high byte kept
+        rep #$20
+        sta.w !TilemapBuf+<dst>,x
+endmacro
+MetaPut:
+        %meta_word(0, 0)
+        %meta_word(2, 2)
+        %meta_word(4, 64)       ; the next tile row down, 32 words on
+        %meta_word(6, 66)
+        rtl
+
+; Every `!BgAttr` as a character with no slot written yet: `!PLAY_PRI`,
+; palette 0. From `Reset`, after the WRAM clear.
+SlotInit:
+        php
+        sep #$20
+        rep #$10
+        ldx.w #$00FF
+        lda.b #!PLAY_PRI>>8
+-       sta.l !BgAttr,x
+        dex
+        bpl -
+        plp
+        rtl
+
+; The `!TilemapBuf` word at Y given its character's palette, whatever it had:
+; `SeedWorld` forces a tile id under the high byte the room was drawn with.
+; Keeps X, Y and the widths.
+PlayAttrAtY:
+        php
+        rep #$30
+        lda.w !TilemapBuf,y
+        and.w #$E3FF
+        %attr_w()
+        sta.w !TilemapBuf,y
+        plp
+        rtl
+
+; `BlockWrite4`'s four words, each with its palette. in: 8-bit A the base id,
+; !BlkDst the slot.
+BlockWrite4L:
+        rep #$30
+        and.w #$00FF
+        ora.w #!PLAY_PRI
+        pha
+        lda !BlkDst
+        asl a                   ; a word index, and the buffer is two bytes a slot
+        tax
+        lda 1,s
+        %attr_w()
+        sta.w !TilemapBuf,x
+        lda 1,s
+        inc a
+        %attr_w()
+        sta.w !TilemapBuf+2,x
+        lda 1,s
+        inc a
+        inc a
+        %attr_w()
+        sta.w !TilemapBuf+64,x  ; the next tile row down, 32 words on
+        pla
+        inc a
+        inc a
+        inc a
+        %attr_w()
+        sta.w !TilemapBuf+66,x
+        sep #$20
+        lda.b #$01
+        sta !Redraw
+        rep #$30
+        rtl
+
+; `!SlCount` attribute bytes of sheet `!SlId`, from its Game Boy tile
+; `!SlFirst`, into `!BgAttr` from character `!SlDest`: the `slots` blob's
+; record of that sheet (`full_slots`). A character past $FF is not BG3's and is
+; skipped. Keeps every register, `!Blob`, `!BlobLen`, `!ArgClass` and
+; `!ArgId`; not `!SlCount`.
+SlotFill:
+        php
+        rep #$30
+        phx
+        phy
+        lda !ArgClass           ; and !ArgId
+        pha
+        lda !Blob
+        sta.w !SlBlob
+        lda !Blob+2
+        sta.w !SlBlob+2
+        lda !BlobLen
+        sta.w !SlBlob+3
+        sep #$20
+        lda.b #!CLASS_SLOTS
+        sta !ArgClass
+        stz !ArgId
+        jsl FindBlobLong
+        bcs +
+        jml Fatal
++       rep #$30
+        lda.w !SlId
+        and.w #$00FF
+        asl a
+        tay
+        lda [!Blob],y           ; where the sheet's bytes start
+        cmp.w #$FFFF
+        bne +
+        jml Fatal               ; a character sheet always has them
++       clc
+        adc.w !SlFirst
+        clc
+        adc !Blob
+        sta !A1T1L              ; the first byte, in the blob's bank
+        ; As many as land on characters $00-$FF.
+        lda.w !SlDest
+        cmp.w #$0100
+        bcs .done
+        clc
+        adc.w !SlCount
+        cmp.w #$0101
+        bcc +
+        lda.w #$0100
++       sec
+        sbc.w !SlDest
+        beq .done
+        sta !DAS1L
+        ; By DMA through the WRAM port, channel 1: nothing in NMI uses either.
+        lda.w !SlDest
+        clc
+        adc.w #!BgAttr
+        sta !WMADDL             ; and WMADDM
+        sep #$20
+        lda.b #!BgAttr>>16&1
+        sta !WMADDH
+        lda !Blob+2
+        sta !A1B1
+        stz !DMAP1              ; one register, incrementing source
+        lda.b #!WMDATA&$FF
+        sta !BBAD1
+        lda.b #$02
+        sta !MDMAEN
+.done
+        rep #$30
+        lda.w !SlBlob+3
+        sta !BlobLen
+        lda.w !SlBlob+2
+        sta !Blob+2
+        lda.w !SlBlob
+        sta !Blob
+        pla
+        sta !ArgClass
+        ply
+        plx
+        plp
+        rtl
+
+; `DoCopy`'s, once `!Src` is on the copy and before it is made or queued: a
+; copy into BG3's characters writes their slots (`SlotFill`), and a tilemap
+; copy goes up from `!TmStage` with each word's palette, the window's or the
+; play field's by where it lands. The stage is shared by the copies one
+; crossing queues, so each takes the next part of it. 16-bit A, X and Y in;
+; keeps them all.
+CopyAttrs:
+        php
+        rep #$30
+        phx
+        phy
+        sep #$20
+        lda !ArgClass           ; the region `CopyClassToRegion` chose
+        cmp.b #!CLASS_CHR_BG
+        beq .chars
+        cmp.b #!CLASS_TILEMAP
+        beq .map
+        jmp .out
+.chars
+        lda !ArgId
+        sta.w !SlId
+        rep #$20
+        lda !Tmp                ; 2bpp: a Game Boy tile is sixteen bytes
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlFirst
+        lda !Dest               ; BG3's characters are at word 0, eight words each
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlDest
+        lda !Words
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlCount
+        jsl SlotFill
+        jmp .out
+.map
+        ; The stage's next free byte: from zero unless queued copies are
+        ; still waiting for NMI.
+        lda !TransRun
+        beq +
+        lda.w !XferEnd
+        bne ++
++       rep #$20
+        stz.w !TmUsed
+++      rep #$30
+        lda !Words
+        asl a
+        clc
+        adc.w !TmUsed
+        cmp.w #$0801
+        bcc +
+        jml Fatal               ; more than one map's worth queued at once
++       ldx.w !TmUsed           ; this copy's part of the stage
+        sta.w !TmUsed
+        phx
+        lda !Words
+        sta.w !SlCount
+        ldy.w #$0000
+.word
+        lda !Dest
+        cmp.w #!BG2_MAP         ; carry set: the window's map
+        lda [!Src],y
+        bcs .window
+        and.w #$E3FF
+        %attr_w()
+        bra .put
+.window
+        sep #$20
+        jsl WinAttr             ; the high byte, whole: a window word carries
+        xba                     ; nothing else
+        lda [!Src],y
+        rep #$20
+.put
+        sta.l !TmStage,x
+        inx
+        inx
+        iny
+        iny
+        dec.w !SlCount
+        bne .word
+        ; And the copy reads the stage.
+        pla
+        clc
+        adc.w #!TmStage
+        sta !Src
+        sep #$20
+        lda.b #!TmStage>>16
+        sta !Src+2
+.out
+        rep #$30
+        ply
+        plx
+        plp
+        rtl
+
+; One of the title's sheets' slots, as `UploadTitleChr` lays it down: `!ArgId`
+; with `!Blob` on it, from character `!TitleDst`/8. Under its forced blank, so
+; GAME OVER's too. Keeps the registers and the widths.
+TitleSlots:
+        php
+        sep #$20
+        lda !ArgId
+        sta.w !SlId
+        rep #$20
+        stz.w !SlFirst
+        lda !TitleDst
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlDest
+        lda !BlobLen
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlCount
+        jsl SlotFill
+        plp
+        rtl
 
 ; The image is whole banks (`snes_inject` asserts it): bank 1 padded to its end.
 padbyte $FF

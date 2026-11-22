@@ -121,6 +121,11 @@ pub const Class = enum {
     /// lists and their data (Step 5b), ids 2-6. Appended last, for the
     /// reason every class since `directory` was.
     debug,
+    /// The palette slot of every Game Boy tile each character sheet holds,
+    /// for the `full` scheme's per-tile palettes (colorization Step 6): one
+    /// blob, `full_slots.blob`. Appended last, for the reason every class
+    /// since `directory` was.
+    slots,
 
     pub fn label(self: Class) []const u8 {
         return @tagName(self);
@@ -209,6 +214,9 @@ pub const reserved: [class_count]usize = blk: {
     // banks, and far from it. Step 5b adds the WARP page: 160 rows of 24 and
     // 160 of `warp_bytes`, 6405 bytes more, and a blob never crosses a bank.
     r[@intFromEnum(Class.debug)] = 12 * K;
+    // Colorization Step 6. A 512-byte header and a byte per Game Boy tile
+    // of every character sheet, both depths: about 9 KiB.
+    r[@intFromEnum(Class.slots)] = 16 * K;
     break :blk r;
 };
 
@@ -386,7 +394,7 @@ pub const directory_entry_bytes: usize = 8;
 pub fn blobCount(set: convert.Set) usize {
     return set.assets.len + set.metatiles.len + set.collision.len +
         1 + set.map_cells.len + set.map_screens.len + 2 + 1 +
-        1 + set.physics.len + set.metasprites.len + set.enemies.len + set.aram.len + set.title_art.len + set.debug.len; // solidity, doors and load_sources, door_pointers, the directory
+        1 + set.physics.len + set.metasprites.len + set.enemies.len + set.aram.len + set.title_art.len + set.debug.len + 1; // the slots blob, solidity, doors and load_sources, door_pointers, the directory
 }
 
 pub fn directoryBytes(set: convert.Set) usize {
@@ -460,6 +468,8 @@ pub fn measure(set: convert.Set) Measure {
 
     std.debug.assert(set.debug.len <= max_blobs);
     measureBlobs(&m.classes[@intFromEnum(Class.debug)], .debug, set.debug, &buf);
+
+    measureBlobs(&m.classes[@intFromEnum(Class.slots)], .slots, &.{set.slots}, &buf);
 
     return m;
 }

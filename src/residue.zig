@@ -403,8 +403,8 @@ pub const fields = [_]Field{
         .define = "TransRun",
         .establishes = .zeroed,
         .carry = .carried,
-        .reads = &.{ "AudioFrame", "DoCopy", "RunPendingTransition" },
-        .note = "Whether the script has been started. Zero means the frame the interpreter spends at 00:$23AF before it has fetched anything, which is a real frame of the transition's duration and the reason this is a flag rather than a null pointer: the pointer does not exist until that frame is already spent. `AudioFrame` (metroid2-audio Step 16a) reads it with `DoorIndex`: owed and not started is the trigger's pass just ended, whose entry wait is a second `handleAudio` call. `DoCopy` (Step 24b) reads it as \"a live crossing\": nonzero queues the copy for the next vblank, zero is the boot record's script or a load, which copy at once under their own forced blank.",
+        .reads = &.{ "AudioFrame", "CopyAttrs", "DoCopy", "RunPendingTransition" },
+        .note = "Whether the script has been started. Zero means the frame the interpreter spends at 00:$23AF before it has fetched anything, which is a real frame of the transition's duration and the reason this is a flag rather than a null pointer: the pointer does not exist until that frame is already spent. `AudioFrame` (metroid2-audio Step 16a) reads it with `DoorIndex`: owed and not started is the trigger's pass just ended, whose entry wait is a second `handleAudio` call. `DoCopy` (Step 24b) reads it as \"a live crossing\": nonzero queues the copy for the next vblank, zero is the boot record's script or a load, which copy at once under their own forced blank. `CopyAttrs` (colorization Step 6) reads it the same way: a tilemap copy's stage is shared only by copies still queued.",
     },
     .{
         .define = "TransCls",
@@ -2049,8 +2049,8 @@ pub const fields = [_]Field{
         .define = "BlkDst",
         .establishes = .zeroed,
         .carry = .scratch,
-        .note = "The tilemap slot a draw is about to write: $C215/$C216 with the `AND $DE` already applied. Written by `BlockSlotAddr` and read by the two routines that draw, inside one call each. `BlockSlotAddr` is its own third reader because it accumulates the row and the column in it, which is the original adding the column to L at 00:$22D7.",
-        .reads = &.{ "BlockSlotAddr", "BlockWrite4", "DestroyBlock" },
+        .note = "The tilemap slot a draw is about to write: $C215/$C216 with the `AND $DE` already applied. Written by `BlockSlotAddr` and read by the two routines that draw, inside one call each (`BlockWrite4`'s body is `BlockWrite4L` in bank 1 since colorization Step 6). `BlockSlotAddr` is its own third reader because it accumulates the row and the column in it, which is the original adding the column to L at 00:$22D7.",
+        .reads = &.{ "BlockSlotAddr", "BlockWrite4L", "DestroyBlock" },
     },
     .{
         .define = "BlkCrush",
