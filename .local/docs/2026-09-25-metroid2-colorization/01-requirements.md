@@ -9,6 +9,8 @@ updated:
   - 2026-11-21T06:18:43Z
   - 2026-11-21T19:21:16Z
   - 2026-11-21T19:37:57Z
+  - 2026-11-22T04:09:57Z
+  - 2026-11-22T06:54:13Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -177,9 +179,12 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
   health falls, in a few steps by the fraction of its species' full health
   left. The OBP1 hit flash still shows over it. The Queen is left out: her
   AI already shows her health.
-- **Fades and flashes** work as in `gbc`: the DMG registers (BGP, OBP0,
-  OBP1) remap the four shades within every slot, at the original's timing.
+- **Fades and flashes** work as in `gbc`: CGRAM holds each slot through the
+  live DMG registers (BGP `$93`, OBP0 `$93`, OBP1 `$43`), and fades and
+  flashes are INIDISP brightness and colour math, at the original's timing.
   Fades dim and restore the colours. This is checked, not assumed.
+  (Amended 2026-11-22: `gbc` never remaps CGRAM on register writes.)
+- The title, credits and game over use the `surface` colour set.
 - **Capacity:** design shows that one screen never needs more palettes than
   the SNES layout gives. Today the HUD's 4bpp palette 1 (CGRAM `$10-$1F`)
   overlaps BG3 palettes 4-7, and object palettes 2-7 are free. If the

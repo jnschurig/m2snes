@@ -321,9 +321,40 @@ Since colorization Step 6 every tilemap word carries its tile's slot.
   slot 5 and its other tiles the rest, so its twelve spikes keep their
   derived slots. Acid tiles (bit 4) are not counted as spikes; they take
   the acid colour set.
+- **Objects** (Step 7). `!ObjSlot` (`$7E3500`) is `!BgAttr`'s twin for the
+  256 object characters, holding plain slots (0-7): an object sheet's blob
+  bytes are its slots, not `attr` bytes (`UploadSamusBgTwin` converts the 48
+  it lends BG3). Every copy into the object characters writes it
+  (`ObjSlots`, from `CopyAttrs`, `UploadSamusChr`, `UploadTitleObj`, the
+  credits' rows, and `LoadGraphics`/`VariaAnimStart` when a `GfxInfo` row is
+  queued, not when NMI moves it). `PutObject` indexes `PutAttr` by the Game
+  Boy attribute's high nibble with the tile's slot in bits 0-2, on page
+  `!ObjPage`: 0 for `mono` and `gbc` (OBP1 as palette 1, the slot ignored),
+  1 for `full`, and for an enemy in `full` `EnemyObjPage`'s: 2 a hit
+  Metroid, 3 frozen (`iceCounter` non-zero, every part in slot 3: EJRTQ's
+  01:`7B87`). `LoadPalette` sets the page from the scheme, and `DrawEnemies`
+  puts it back after the enemies. The builder patches pages 1-3 from
+  `full_slots.objAttr`: the slot through the OBP1 swap (3 → 1, else 3).
+  EJRTQ tells Samus's entries from the rest by OAM index; the port needs no
+  split, since only enemies get pages 2 and 3. The cost is some fourteen
+  cycles an object. A first version that masked and stored the attribute
+  and set the page in every `PutObject` (about fifty) lagged the Queen's
+  room a frame.
+- **Metroid damage** (Step 7; ours, not EJRTQ's). `EnemyObjPage` gives a
+  Metroid's parts (AI Alpha, hatching Alpha, Gamma, Zeta, Omega or larval;
+  the Queen is no slot) page 2 when `full_slots.metroidStep` of its health
+  and full health (`+$0C`, `+$11`) is non-zero: 1 at three quarters or less,
+  2 at a half, 3 at a quarter. Page 2 draws the body slot (4) in OBJ palette
+  2. The OBP1 hit flash and frozen still win. No sprite in play uses slot 2
+  but the Queen's sheet and `gfx_enemiesE` `$0C`, so one palette is free
+  for it. It holds one step: `DrawEnemies` publishes the pass's worst in
+  `!MetStep`, and Step 8 loads palette 2 from it. Several hit Metroids on
+  screen (the larval rooms) all show the worst one's step. A Metroid's
+  fireball or husk carries its AI but health `$FF`, which is no step.
 - **Capacity.** BG uses slots 0-7: at least one tileset (`gfx_ruinsExt`)
   uses all eight, BG3 palettes 0-7 (CGRAM `$00-$1F`). Sprites use slots 0-7,
-  which map to SNES OBJ palettes 0-7 (CGRAM `$80-$FF`).
+  which map to SNES OBJ palettes 0-7 (CGRAM `$80-$FF`); palette 2 doubles as
+  the Metroid damage palette outside the Queen's room.
 
 ## Decisions
 

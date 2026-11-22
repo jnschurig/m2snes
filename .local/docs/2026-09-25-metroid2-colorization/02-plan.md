@@ -8,6 +8,8 @@ updated:
   - 2026-11-21T06:18:43Z
   - 2026-11-21T19:21:16Z
   - 2026-11-21T19:37:57Z
+  - 2026-11-22T04:09:57Z
+  - 2026-11-22T06:49:33Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -239,32 +241,53 @@ two other ways:
         colour appears that the old cart doesn't show.)
   - [x] Commit: "full: per-tile BG and window palettes".
 
-- [ ] **Step 7: Per-sprite OBJ palettes**
-  - [ ] OAM conversion (`PutObject` and friends) takes the palette from the
+- [x] **Step 7: Per-sprite OBJ palettes**
+  - [x] OAM conversion (`PutObject` and friends) takes the palette from the
         VRAM tile table (unsigned addressing) and applies the OBP1 swap: slot
         3 → 1, anything else → 3. `mono`/`gbc` keep today's 0/1 mapping.
-  - [ ] Frozen enemies: an enemy whose `iceCounter` (+$0B) is non-zero draws
+  - [x] Frozen enemies: an enemy whose `iceCounter` (+$0B) is non-zero draws
         in slot 3 (EJRTQ `01:7B87`), and the OBP1 swap doesn't override it.
-  - [ ] Metroid damage: a Metroid's (not the Queen's) OBJ colours step
+  - [x] Metroid damage: a Metroid's (not the Queen's) OBJ colours step
         towards red by the fraction of its species' full health left, a few
         steps, `full` only. Design the CGRAM side first: one Metroid on
         screen at a time lets one palette be rewritten in vblank; check
         that holds (larval rooms have several) or give each step a palette.
         The OBP1 swap still applies over it. ROM-free unit tests on the
         step function.
-  - [ ] Verify: `zig build verify` green, and the object screenshots are
+        (Done: `!ObjSlot` per object character, plain slots, filled by every
+        object copy; `PutAttr` grows three `full` pages the builder patches
+        from `full_slots.objAttr`: 1 plain, 2 a hit Metroid, 3 frozen.
+        James chose one shared damage palette, OBJ 2, free in play but for
+        the Queen's sheet and `gfx_enemiesE` `$0C`: a hit Metroid's body
+        (slot 4) draws in it, and `!MetStep` holds the worst step on screen,
+        4 states by quarters of health left. Step 8 loads its colours.)
+  - [x] Verify: `zig build verify` green, and the object screenshots are
         unchanged in `gbc`.
-  - [ ] Commit: "full: per-sprite palettes".
+        (Green but the pins, re-pinned. A first version cost ~50 cycles an
+        object and lagged all six Queen cases a frame; now ~14. Mesen spot
+        checks with `!Scheme` poked to 2: Samus's 14 objects at the landing
+        site match their slots, 12 non-zero; a seeded enemy frozen draws in
+        3; posed as an Alpha at 1/8, `!MetStep` is 3.)
+  - [x] Commit: "full: per-sprite palettes".
 
 - [ ] **Step 8: The `full` scheme — CGRAM, the L cycle and the badge**
-  - [ ] `colors.zig`: `full = 2`. Its data shape: per area, 8 BG slots × 4
-        colours; global OBJ slots, with Samus in Samus Returns' Power and
-        Varia colours; window slots. `cgramWords` grows to a full CGRAM image
-        per (area, BGP, OBP0, OBP1). ROM-free unit tests on synthetic tables
-        cover the image builder, including a mid-fade register value.
-  - [ ] Engine: rebuild CGRAM in vblank on BGP/OBP writes (the remap within
-        each slot, as `gbc` does) and on area change. The area comes from Step 4's generated
-        per-screen table in cart.
+  - [ ] `colors.zig`: `full = 2`. Its data shape: per colour set (12 areas,
+        11 `nest` variants, `acid`), 8 BG slots × 4 colours; global OBJ slots,
+        with Samus in Samus Returns' Power and Varia colours; window slots.
+        One CGRAM image per colour set through the live registers
+        (`screens.live_bgp/obp0/obp1`), as `gbc`'s. ROM-free unit tests on
+        synthetic tables cover the image builder.
+  - [ ] Engine: reload CGRAM in vblank when the colour set changes
+        (`areas.lookOf`: the camera cell's byte in Step 4's per-screen table,
+        and whether the loaded metatile table is a lava table). **Fades stay
+        INIDISP brightness, as in `gbc`; no remap on BGP/OBP writes**
+        (amended 2026-11-22: the cart never remaps CGRAM, `ApplyPalette`).
+        The title, credits and game over use the `surface` set (James,
+        2026-11-22).
+  - [ ] OBJ palette 2 (Step 7's decision): outside the Queen's room it holds
+        the Metroid damage step `!MetStep` publishes (0 = slot 2's own
+        colours), reloaded when the step changes; in her room, her slot-2
+        colours whatever `!MetStep` says.
   - [ ] L cycles three schemes, with the badge glyphs for `FULL`. An older
         cart reading id 2 already falls back.
   - [ ] Placeholder colours: distinct hues per area. Real colours come in
@@ -297,10 +320,10 @@ two other ways:
   - [ ] Set rung: at an acid cave and a Metroid room, CGRAM holds the
         `acid`/`nest` set, and a Metroid hit down a step shows the next
         damage step.
-  - [ ] Colour rung: CGRAM equals the area's tables after the DMG registers
-        are applied, at those states plus one mid-fade state (a door
-        transition or the title fade), checked against the full-brightness
-        state either side of it.
+  - [ ] Colour rung: CGRAM equals the area's tables after the live DMG
+        registers are applied, at those states plus one mid-fade state (a
+        door transition or the title fade), where CGRAM is unchanged and only
+        INIDISP's brightness steps.
   - [ ] Data unit tests: look-alike slots equal, colour 0 black, colour 3
         darkest in every slot, every room
         has an area, every area is paired and complete, no `Fatal` magenta in

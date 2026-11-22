@@ -3267,11 +3267,18 @@ assert !QueenWin+(2*!QUEEN_WIN_B) <= $1800
 ; (`SlotFill`); every play-field word takes it. Absolute, below the stack (which
 ; keeps $1900-$1FFF), because `MetaPut` reads it on every strip.
 !BgAttr       = $001800         ; 256
+; Colorization Step 7. Per object character, the slot (0-7) of the Game Boy
+; tile last copied there: every copy into the objects' characters writes it
+; (`ObjSlotFill`), and `PutObject` takes each object's palette from it. Read
+; long, so anywhere in bank $7E, after the Queen's tables.
+!ObjSlot      = $7E3500         ; 256
+assert !BgAttr>>16&1 == !ObjSlot>>16&1   ; `SlotFill`'s one WMADDH
 ; 1.0 Step 19c: BGP mid-frame, as two tables of the TM table's shape, written at
 ; its offsets: INIDISP on channel 4, and COLDATA on channel 3. See `QueenApply`.
 !QueenDisp    = $7E3400
 !QueenAdd     = $7E3480
 assert !QueenDisp+(2*!QUEEN_TM_B) <= !QueenAdd
+assert !QueenAdd+(2*!QUEEN_TM_B) <= !ObjSlot
 !QUEEN_FLASH_BGP = $93^$90      ; 03:$6E57: her flash's other phase, every shade 0 but 0's
 !QUEEN_CGADSUB = $06            ; add, to BG2 and BG3: the head and the room
 !COLDATA_NONE = $E0             ; nothing added, on all three planes
@@ -3598,8 +3605,14 @@ ConstCollBlobs = !COLL_BLOBS
 !SlCount      = $07AF           ; 2: how many
 !SlId         = $07B1           ; the sheet's asset id
 !HudBg3       = $07B2           ; $80 while the status bar is BG3's (her room), 0 the window's
+!SlBase       = $07B3           ; 2: the table `SlotFill` writes, `!BgAttr` or `!ObjSlot`
+!ObjPage      = $07B5           ; `PutObject`'s page of `PutAttr`: 0 mono/gbc, 1 full; an enemy's 2 hit Metroid, 3 frozen
+!MetStepAcc   = $07B6           ; the worst Metroid damage step `DrawEnemies` has drawn so far this pass
+!MetStep      = $07B7           ; and at its end: what OBJ palette 2 shows in `full` (Step 8)
 !SlBlob       = $07BA           ; 5: `!Blob` and `!BlobLen`, kept across `SlotFill`
 !TmUsed       = $07BF           ; 2: bytes of `!TmStage` the queued copies hold
+!MetMax       = $07C1           ; 2: `EnemyObjPage`'s full health
+!MetH4        = $07C3           ; 2: and four times the health left
 !XFER_BYTES   = 7
 !XFER_MAX     = 7
 
@@ -5556,7 +5569,14 @@ UploadSamusChr:
         sep #$20
         lda.b #$01
         sta !MDMAEN
+        lda.w BootSamusChr      ; colorization Step 7: and their slots
+        sta.w !SlId
         rep #$30
+        lda !BlobLen
+        tay
+        ldx.w #!OBJ_CHAR_BASE
+        lda.w #$0000
+        jsl ObjSlots
         jsl UploadSamusBgTwin   ; 1.0 Step 6, bank 1: $8800-$8AFF are the BG's too
         rts
 
@@ -12955,11 +12975,23 @@ PutObject:
         ; the Game Boy's window. Priority 2 is above both. The bit reaches here
         ; from `DrawSprite`'s $4BA1 arm on Samus's parts, and from a record's
         ; own attribute on anything else.
-        rep #$30
+        ;
+        ; Colorization Step 7: the palette. `PutAttr` is four pages, indexed
+        ; by the Game Boy byte's high nibble with the tile's slot (`!ObjSlot`)
+        ; in bits 0-2, the page `!ObjPage`: `mono` and `gbc` read page 0,
+        ; which ignores the slot, and `full` page 1 (`!Scheme`/2), or for an
+        ; enemy `EnemyObjPage`'s: 2 a hit Metroid, 3 frozen.
+        ; `full_slots.objAttr` fills pages 1-3. Some fourteen cycles more
+        ; than one page: the Queen's room draws forty objects a frame.
+        sep #$30
+        ldx.w !ObjTile
+        lda.w !ObjPage
+        xba
         lda.w !ObjAttr
-        and.w #$00FF
-        tax
-        sep #$20
+        and.b #$F0              ; the Game Boy's nibble: a record may hold anything below
+        ora.l !ObjSlot,x        ; the slot, 0-7
+        rep #$10
+        tax                     ; 16-bit: the page under the index
         lda.l PutAttr,x
         ldx !OamIdx
         sta.w !OamBuf+3,x
@@ -21312,10 +21344,10 @@ FirstEmptyProj:
 DrawEnemies:
         sep #$20
         rep #$10
+        stz.w !MetStepAcc       ; colorization Step 7
         lda.w !EnActive
         bne +                   ; $5A14
-        rep #$30
-        rts
+        bra .out
 +       ldx.w #$0000
 .slot
         sep #$20
@@ -21341,6 +21373,13 @@ DrawEnemies:
         tax
         cpx.w #!SlotCount*!SlotSize
         bne .slot               ; $5A3C
+.out
+        sep #$20
+        lda.w !MetStepAcc       ; colorization Step 7: the pass's worst
+        sta.w !MetStep
+        lda.w !Scheme           ; and the page every other object reads
+        lsr a
+        sta.w !ObjPage
         rep #$30
         rts
 
@@ -21370,6 +21409,10 @@ DrawEnemySprite:
         eor.w !Slots+!EN_STUN,x
         and.b #$F0              ; $5AAC
         sta.w !DrawEnAttr
+        lda.w !ObjPage          ; colorization Step 7: in `full`, the enemy's
+        beq +                   ; page (`mono` and `gbc` have one)
+        jsl EnemyObjPage
++
 
         ; ---- $5A43, the record ---------------------------------------------
         rep #$30
@@ -25041,7 +25084,13 @@ UploadTitleObj:
         sep #$20
         lda.b #$01
         sta !MDMAEN
+        lda.w BootTitleObj      ; colorization Step 7: and their slots
+        sta.w !SlId
         rep #$30
+        ldy.w #!TITLE_OBJ_BYTES
+        ldx.w #!OBJ_CHAR_BASE+(!TITLE_OBJ_FIRST*16)
+        lda.w #$0000
+        jsl ObjSlots
         rtl
 
 ; ---------------------------------------------------------------------------
@@ -30887,12 +30936,101 @@ QueenNmiRow:
 
 ; `PutObject`'s attribute byte for each Game Boy one: the flips a bit left,
 ; OBP1 as palette 1, and priority 2 unless the behind-background bit is set.
+; The low nibble, the cart's own (`PutObject`), changes nothing here.
 PutAttr:
 !pa = 0
 while !pa < 256
         db ((!pa&$60)<<1)|((!pa&$10)>>3)|(((!pa&$80)>>2)^$20)
         !pa #= !pa+1
 endwhile
+; Colorization Step 7: `full`'s pages, by `snes_inject` from
+; `full_slots.objAttr`: 1 the slot in the low bits through the OBP1 swap, 2 the
+; same with a Metroid's body in the damage palette, 3 frozen. $FF here.
+PutAttrFull:
+        fillbyte $FF : fill 768
+assert PutAttrFull == PutAttr+256
+
+; ---------------------------------------------------------------------------
+; Colorization Step 7: an enemy's page of `PutAttr`. `DrawEnemySprite`'s in
+; `full` only, once per enemy, with X its slot: `!ObjPage` for its parts.
+; Frozen (`iceCounter` non-zero) is page 3, every part in the frozen slot:
+; EJRTQ's 01:$7B87, hooked at $5AAD. Otherwise a Metroid (larval, Alpha to
+; Omega; not the Queen, who is no slot) with health at or under three
+; quarters of its own full health is page 2, whose body slot is OBJ palette
+; 2, and the pass's worst step goes to `!MetStepAcc`. Anything else is page
+; 1. `full_slots.metroidStep` is the rule, and its tests are this routine's.
+; Any widths in; keeps every register and the widths.
+; ---------------------------------------------------------------------------
+; The AIs it counts as Metroids, `roster.metroid_species`.
+macro metroid_ai(ai)
+        cmp.w #<ai>
+        beq .metroid
+endmacro
+EnemyObjPage:
+        php
+        sep #$20
+        rep #$10
+        lda.w !Slots+!EN_ICE,x
+        beq +
+        lda.b #3                ; frozen
+        sta.w !ObjPage
+        bra .out
++       lda.b #1
+        sta.w !ObjPage
+        rep #$20
+        lda.w !Slots+!EN_AI,x
+        %metroid_ai($6BB2)      ; the Alpha that hatches
+        %metroid_ai($6C44)      ; Alpha
+        %metroid_ai($6F60)      ; Gamma
+        %metroid_ai($7276)      ; Zeta
+        %metroid_ai($7631)      ; Omega
+        %metroid_ai($7A4F)      ; larval
+        bra .out
+.metroid
+        ; Health $FD-$FF, or a full health there, is not a health: Omega's
+        ; fireball and Zeta's husk are its AI with $FF.
+        phy
+        lda.w !Slots+!EN_MAXHP,x
+        and.w #$00FF
+        beq .none
+        cmp.w #!EN_HP_RESPAWN
+        bcs .none
+        sta.w !MetMax
+        lda.w !Slots+!EN_HEALTH,x
+        and.w #$00FF
+        beq .none               ; dead: an explosion, not a Metroid
+        cmp.w #!EN_HP_RESPAWN
+        bcs .none
+        asl a
+        asl a
+        sta.w !MetH4            ; four times the health left
+        ldy.w #3
+        lda.w !MetMax
+        cmp.w !MetH4
+        bcs .step               ; a quarter or less: 3
+        dey
+        asl a
+        cmp.w !MetH4
+        bcs .step               ; a half or less: 2
+        dey
+        adc.w !MetMax           ; carry clear
+        cmp.w !MetH4
+        bcs .step               ; three quarters or less: 1
+.none
+        ply
+        bra .out
+.step
+        sep #$20
+        tya
+        cmp.w !MetStepAcc
+        bcc +
+        sta.w !MetStepAcc
++       lda.b #2
+        sta.w !ObjPage
+        ply
+.out
+        plp
+        rtl
 
 ; `ApplyPalette`'s mapping: a DMG palette in A, its INIDISP brightness out.
 ; See `ApplyPalette`. 8-bit A in and out; X and Y kept.
@@ -31541,6 +31679,18 @@ UploadSamusBgTwin:
         lda.w #!SAMUS_TWIN_LAST-!SAMUS_TWIN_FIRST+1
         sta.w !SlCount
         jsl SlotFill
+        ; Step 7: an object sheet's bytes are plain slots (`full_slots`), so
+        ; these become play-field words' high bytes here, under the blank.
+        sep #$20
+        ldx.w #!SAMUS_TWIN_FIRST
+-       lda.l !BgAttr,x
+        asl a
+        asl a
+        ora.b #!PLAY_PRI>>8
+        sta.l !BgAttr,x
+        inx
+        cpx.w #!SAMUS_TWIN_LAST+1
+        bne -
         plp
         rtl
 
@@ -31571,6 +31721,10 @@ LoadDefaultPalette:
         sta.w !Scheme
 LoadPalette:
         php
+        sep #$20
+        lda.w !Scheme           ; colorization Step 7: `PutObject`'s page
+        lsr a
+        sta.w !ObjPage
         rep #$30
         lda.w !Scheme
         and.w #$00FF
@@ -31832,6 +31986,7 @@ LoadGraphics:
         sta.w !GfxQ+4,y
         lda.l GfxInfo+6,x
         sta.w !GfxQ+6,y
+        jsr GfxInfoSlots                ; colorization Step 7
         sep #$20
         lda.w !GfxQTail                 ; and only then is it NMI's to see
         inc a
@@ -31842,6 +31997,28 @@ LoadGraphics:
         plx
         pla
         plp
+        rts
+
+; Colorization Step 7: the slots of `GfxInfo` row X (a byte offset) into
+; `!ObjSlot`, when the row is queued rather than when NMI moves it: NMI is no
+; place for `FindBlob`, and a row's transfer is a frame or two. `!ArgId` is the
+; row's sheet. Keeps X and Y; 16-bit A, X and Y out.
+GfxInfoSlots:
+        sep #$20
+        lda !ArgId
+        sta.w !SlId
+        rep #$30
+        phy
+        lda.l GfxInfo+6,x
+        tay
+        lda.l GfxInfo+4,x
+        phx
+        pha
+        lda.l GfxInfo+2,x
+        plx
+        jsl ObjSlots
+        plx
+        ply
         rts
 
 ; A pair of rows, A's and the next: a spin sheet's top and bottom, or the
@@ -32321,7 +32498,8 @@ VariaAnimStart:
         plx
         bcs +
         jml Fatal
-+       lda !Blob
++       jsr GfxInfoSlots                ; colorization Step 7: the suit's slots
+        lda !Blob
         clc
         adc.l GfxInfo+2,x
         sta.w !VariaSrc
@@ -38851,10 +39029,26 @@ CreditsChrRow:
         sep #$20
         lda.b #$01
         sta !MDMAEN
-        ; Colorization Step 6: a background row writes its characters' slots.
+        ; Colorization Step 6: a background row writes its characters' slots,
+        ; and Step 7 an object row its objects'.
         lda !ArgClass
         cmp.b #!CLASS_CHR_BG
-        bne +
+        beq ++
+        lda !ArgId
+        sta.w !SlId
+        rep #$30
+        phx
+        lda.l CreditsChrRows+6,x
+        tay
+        lda.l CreditsChrRows+2,x
+        pha
+        lda.l CreditsChrRows+4,x
+        tax
+        pla
+        jsl ObjSlots
+        plx
+        bra +
+++
         lda !ArgId
         sta.w !SlId
         rep #$20
@@ -39623,8 +39817,23 @@ BlockWrite4L:
 ; `!SlFirst`, into `!BgAttr` from character `!SlDest`: the `slots` blob's
 ; record of that sheet (`full_slots`). A character past $FF is not BG3's and is
 ; skipped. Keeps every register, `!Blob`, `!BlobLen`, `!ArgClass` and
-; `!ArgId`; not `!SlCount`.
+; `!ArgId`; not `!SlCount`. `ObjSlotFill` is the same into `!ObjSlot`, from
+; object character `!SlDest` (colorization Step 7).
+ObjSlotFill:
+        php
+        rep #$20
+        pha
+        lda.w #!ObjSlot&$FFFF
+        bra SlotFillAt
 SlotFill:
+        php
+        rep #$20
+        pha
+        lda.w #!BgAttr&$FFFF
+SlotFillAt:
+        sta.w !SlBase
+        pla
+        plp
         php
         rep #$30
         phx
@@ -39674,7 +39883,7 @@ SlotFill:
         ; By DMA through the WRAM port, channel 1: nothing in NMI uses either.
         lda.w !SlDest
         clc
-        adc.w #!BgAttr
+        adc.w !SlBase
         sta !WMADDL             ; and WMADDM
         sep #$20
         lda.b #!BgAttr>>16&1
@@ -39701,6 +39910,45 @@ SlotFill:
         plp
         rtl
 
+; The slots of a copy into the objects' characters, into `!ObjSlot`: sheet
+; `!SlId`, 16-bit A the copy's first byte in the converted 4bpp sheet, X its
+; VRAM word, Y its length in bytes. Thirty-two bytes a Game Boy tile, sixteen
+; words an object character from `!OBJ_CHAR_BASE`. Keeps every register and
+; the widths, and what `ObjSlotFill` keeps.
+ObjSlots:
+        php
+        rep #$30
+        pha
+        phx
+        phy
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlFirst
+        txa
+        sec
+        sbc.w #!OBJ_CHAR_BASE
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlDest
+        tya
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta.w !SlCount
+        jsl ObjSlotFill
+        ply
+        plx
+        pla
+        plp
+        rtl
+
 ; `DoCopy`'s, once `!Src` is on the copy and before it is made or queued: a
 ; copy into BG3's characters writes their slots (`SlotFill`), and a tilemap
 ; copy goes up from `!TmStage` with each word's palette, the window's or the
@@ -39718,7 +39966,18 @@ CopyAttrs:
         beq .chars
         cmp.b #!CLASS_TILEMAP
         beq .map
-        jmp .out
+        cmp.b #!CLASS_CHR_OBJ
+        bne +
+        lda !ArgId              ; Step 7: the objects' characters, `!ObjSlot`
+        sta.w !SlId
+        rep #$30
+        lda !Words
+        asl a
+        tay
+        ldx !Dest
+        lda !Tmp
+        jsl ObjSlots
++       jmp .out
 .chars
         lda !ArgId
         sta.w !SlId

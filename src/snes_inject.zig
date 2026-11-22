@@ -49,6 +49,7 @@ const screens = @import("screens.zig");
 const offsets_table = @import("offsets.zig");
 const gfx_info = @import("gfx_info.zig");
 const colors = @import("colors.zig");
+const full_slots = @import("full_slots.zig");
 
 /// The assembled engine, committed. Both are imported rather than read from
 /// disk so the shipped builder is a single file with no data directory.
@@ -538,6 +539,7 @@ pub fn build(gpa: std.mem.Allocator, set: convert.Set, boot: screen.Boot, diag: 
     try patchTable(&rom, diag);
     try patchBoot(&rom, set, boot, diag);
     try patchSchemes(&rom, diag);
+    try patchObjAttrs(&rom, diag);
     patchHeader(&rom);
     return rom;
 }
@@ -612,6 +614,19 @@ fn patchSchemes(rom: *Rom, diag: *Diagnosis) Error!void {
         for (words, 0..) |w, i| {
             std.mem.writeInt(u16, rom.bytes[at + (id * scheme_words + i) * 2 ..][0..2], w, .little);
         }
+    }
+}
+
+/// `full`'s page of `PutObject`'s attribute table, `PutAttrFull`, from
+/// `full_slots.objAttr`: the OBP1 swap, the frozen rule and the Metroid damage palette are
+/// `full_assign.zig`'s, and nowhere in the engine (colorization Step 7).
+fn patchObjAttrs(rom: *Rom, diag: *Diagnosis) Error!void {
+    const at = symbolOffset("PutAttrFull") orelse {
+        diag.fail(null, "the engine image has no PutAttrFull symbol", .{});
+        return Error.PatchTableMissing;
+    };
+    for ([_]full_slots.ObjPage{ .full, .metroid_hit, .frozen }, 0..) |page, p| {
+        for (0..256) |i| rom.bytes[at + p * 256 + i] = full_slots.objAttr(page, @intCast(i));
     }
 }
 
@@ -1445,6 +1460,34 @@ test "the scheme table is colors.zig's, every scheme in id order" {
     for (image[at..][0 .. colors.count * scheme_words * 2]) |b| try testing.expectEqual(@as(u8, 0xFF), b);
     // And `snes boot` code 15 can tell the default from the old greys.
     try testing.expect(!std.mem.eql(u16, &colors.cgramWords(.mono), &colors.cgramWords(colors.default_scheme)));
+}
+
+test "PutObject's attribute pages: gbc's assembled, full's patched from full_slots" {
+    // Colorization Step 7. The first page is the engine's own arithmetic,
+    // which `full_slots.gbcObjAttr` mirrors; the second is $FF until patched.
+    const put = symbolOffset("PutAttr").?;
+    try testing.expectEqual(put + 256, symbolOffset("PutAttrFull").?);
+    for (0..256) |i| {
+        try testing.expectEqual(full_slots.gbcObjAttr(@intCast(i)), image[put + i]);
+        try testing.expectEqual(@as(u8, 0xFF), image[put + 256 + i]);
+        try testing.expectEqual(@as(u8, 0xFF), image[put + 512 + i]);
+        try testing.expectEqual(@as(u8, 0xFF), image[put + 768 + i]);
+    }
+
+    const gpa = testing.allocator;
+    const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(bytes);
+    var set = try convert.run(gpa, bytes);
+    defer set.deinit();
+    const boot = try screen.chooseBoot(gpa, bytes);
+    var diag: Diagnosis = .{};
+    var rom = try build(gpa, set, boot, &diag);
+    defer rom.deinit();
+    for (0..256) |i| {
+        try testing.expectEqual(full_slots.objAttr(.full, @intCast(i)), rom.bytes[put + 256 + i]);
+        try testing.expectEqual(full_slots.objAttr(.metroid_hit, @intCast(i)), rom.bytes[put + 512 + i]);
+        try testing.expectEqual(full_slots.objAttr(.frozen, @intCast(i)), rom.bytes[put + 768 + i]);
+    }
 }
 
 test "the boot record names the screen the builder chose" {

@@ -1051,6 +1051,7 @@ fn slotsBlob(a: std.mem.Allocator, assets: []const Asset) ![]u8 {
     for (assets, sheets) |s, *out| out.* = .{
         .id = s.id,
         .chr = s.kind != .tilemap,
+        .obj = s.kind == .chr_obj,
         .rom_at = s.rom_at,
         .gb_bytes = s.gb_bytes,
     };
