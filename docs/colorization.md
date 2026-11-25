@@ -356,6 +356,7 @@ Since colorization Step 6 every tilemap word carries its tile's slot.
   which map to SNES OBJ palettes 0-7 (CGRAM `$80-$FF`); palette 2 doubles as
   the Metroid damage palette outside the Queen's room.
 - **Colours and CGRAM** (Step 8). `colors.full` holds `full`'s colours,
+  imported at compile time from `src/data/full_colors.zon` (below),
   shade-indexed like every scheme's: 8 BG slots per colour set
   (`areas.setOf`: the 12 areas, 11 `nest` variants, `acid`; 24 sets), and
   global window, OBJ and Metroid damage tables. `colors.fullTable` applies
@@ -379,6 +380,107 @@ Since colorization Step 6 every tilemap word carries its tile's slot.
   and `queen` rungs). The title also discards a stale NMI flag before NMI
   on, so a setup that ends inside a vblank still gets a whole vblank for
   its first frame.
+
+## Sprite colours and the sprite editor
+
+Under `full`, a sprite pixel can take any of its palette's 12 usable colours,
+not just the Game Boy's 3. Recolouring is done in a local editor, and its
+choices are data the converter applies.
+
+**The shade rule.** Each OBJ palette has 16 entries. A pixel's Game Boy shade
+is `index & 3`, the same in every palette, and `index >> 2` picks one of four
+variants:
+
+| Indices | Shade |
+|---|---|
+| 0 | transparent |
+| 1, 5, 9, 13 | light |
+| 2, 6, 10, 14 | middle |
+| 3, 7, 11, 15 | dark |
+| 4, 8, 12 | never used |
+
+So planes 0-1 of an edited 4bpp tile are still its 2bpp art, and anything that
+reads only those planes shows each pixel's shade:
+- `mono` and `gbc` (`LoadPaletteOne`) write OBP0's four colours four times into
+  CGRAM `$80-$8F` and OBP1's into `$90-$9F`.
+- The window's palettes are 16 words too (four copies), because BG2 draws
+  object characters. In the Queen's room `FullBg` loads her OBJ palette 2 into
+  BG palettes 2-5, so the head BG2 draws from her object tiles takes her
+  full palette.
+- BG twins (`UploadSamusBgTwin`, the BG half of the `spr` and `ITEM` windows,
+  the credits' sprite rows) are 2bpp, so they show each pixel's shade colour.
+  The converter writes `index & 3` into them (`sprite_edits.apply2bpp`).
+- The engine routines that rewrite sprite bitplanes at run time handle planes
+  2-3 too: `DeathErase` (`death.eraseBytes`), `QueenDisintegrate` and
+  `VariaAnimNmi`.
+
+`full`'s OBJ, damage and suit tables are 16 entries each (`colors.Table16`),
+loaded 32 bytes per palette (`FullDmaY`: `LoadFull`, `FullObj2Load`,
+`FullSuitLoad`). A variant entry nobody has edited holds its shade's colour.
+
+**The data files** (`src/data/`). None holds a ROM byte.
+
+| File | What it holds | Written by |
+|---|---|---|
+| `full_colors.zon` | every `full` colour, final (no mid-tones to expand), with comments naming each set's and slot's role | hand, and the editor patches the OBJ-side literals in place |
+| `sprite_edits.zon` | per unique sprite tile: pixel edits (`x`, `y`, `index`) and a palette choice, and the ROM's SHA-1 | the editor, whole |
+| `sprite_frames.zon` | frame names, groups, and the sheet for a frame the model can't place | the editor, whole |
+| `sprite_catalog.zon` | enemy and AI names, AI → sheet, item names | hand |
+
+An edit is keyed by `sprite_edits.tileKey` of the tile's original 16 Game Boy
+bytes, so identical tiles in different sheets are one tile: an enemy looks the
+same in every area. The converter (`snes_convert`) applies each edit to every
+copy in every `chr_obj` asset after `to4bpp`, and to the BG twins. A palette
+choice replaces the tile's derived slot in the `slots` blob
+(`full_slots.blob`); only choices that differ from it are stored. An edit
+whose key matches no tile, an unusable index, or a ROM hash mismatch fails the
+build and names the tile.
+
+Some identical tiles sit in different slots today (9 in this ROM: title and
+credits glyphs, a Samus tile also in `gfx_surfaceSPR`, and a few enemy tiles).
+The editor lists them so one palette can be picked for each.
+
+**The editor** (`src/sprite_editor_main.zig`, `src/sprite_editor.zig`, and the
+page in `src/sprite_editor/`):
+
+```sh
+mise run sprite-editor:start   # background; prints the URL (log, pid in build-out/)
+mise run sprite-editor:stop
+mise run sprite-editor         # or in the foreground, until Ctrl-C
+```
+
+It listens on 127.0.0.1 only, answers only requests whose `Host` (and
+`Origin`, when sent) is that address, and writes only the three editor-owned files above.
+Every request reads them from disk, so the page shows what the next build
+will use.
+
+The page:
+- **Browse.** The left list has frames by group, the unresolved frames, and
+  each sheet as object VRAM holds it. A frame is drawn as the cart draws it
+  under `full`: flips, OAM order, and each part's palette through
+  `full_slots.objAttr`'s pages. Preview toggles show frozen, a Metroid's damage
+  steps, the OBP1 flash, and Power or Varia.
+- **Paint.** Select, Pencil and Eyedropper (V, B, I; Alt-click picks with the
+  pencil). The pencil paints an index, so it can only paint the tile's 12
+  colours or transparent. A stroke is one undo step (⌘Z, ⇧⌘Z). The first
+  edit to a wide-reaching tile (the blank tile) asks first.
+- **Palettes.** The palette panel shows the 12 colours in rows of light,
+  middle and dark. Clicking one picks it for the pencil and marks its pixels
+  in the frame. Its colour input rounds to BGR555 and edits whichever table
+  the preview shows: a suit's for palettes 1 and 7, a damage step's for 2.
+  The frame and the "uses this palette" strip redraw live.
+- **Tiles.** The tile panel shows where a tile is used (frames and copies),
+  its badges (shared, BG twin, Queen's head, Samus, conflict), and a menu of
+  the palettes it may take: an enemy tile never takes Samus's 1 or 7, and a
+  Samus tile takes {1, 7, 2, 3, 4, 6}.
+- **Frames.** Name and group a frame, or choose the sheet for one the model
+  can't place.
+- **Save** (⌘S) writes the files, and only the ones whose bytes change. The
+  server checks the save as the converter would (`sprite_editor.normalize`)
+  and drops no-op pixels. Leaving with unsaved changes asks first.
+
+After saving, `zig build rom` builds the cart with the edits. Edits change the
+cart, so `verify`'s pins go red until `zig build repin -- "<why>"`.
 
 ## Decisions
 

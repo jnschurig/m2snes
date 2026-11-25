@@ -306,7 +306,7 @@ two other ways:
   - [x] Commit: "full: scheme, CGRAM and L cycle".
 
 - [ ] **Step 9: Samus Returns colours**
-  - [ ] Pick per-area colours by eye from the reference screenshots, for each
+  - [x] Pick per-area colours by eye from the reference screenshots, for each
         area's used slots (and the Queen's room); keep look-alike slots
         equal, colour 0 black and colour 3 darkest. `acid` mostly purple
         (`2.52.56`, `2.43.02`), each area's `nest` variant leaning green
@@ -314,9 +314,43 @@ two other ways:
         item-name window blue with white text (`2.40.27`), and the Metroid
         damage steps ending red. Check Samus, the
         Metroids and the credits by eye on the original art.
-  - [ ] Publish a swatch sheet: area, Samus Returns pairing, and a Mesen
+        (Done: a mid-tone a slot, `colors.ramp`; slot roles from a probe of
+        8 distinct hues. Slot 5 red only in areas drawing `ruinsInside` or
+        `finalLab`. The window's colour 3 must be black and the bar's glyphs
+        are colour 3, so the bar is light blue with black glyphs. Found and
+        fixed two Step 8 bugs on the way: `FullFrame` never runs in the
+        Queen's room (now `FullQueen` at `ENTER_QUEEN`), and a camera cell
+        with no area (`$FF`) made set 139 (now the set stays).)
+  - [x] Publish a swatch sheet: area, Samus Returns pairing, and a Mesen
         screenshot per area. **Checkpoint: James approves; tuning is
         data-only.**
+        (`zig build swatch-full` (first `full-shots`): the debug cart in `full` warped to a
+        landing per set, frames to `build-out/full-shots/`. 21 of 24: areas
+        4 and 5 show `acid` in every reachable room, and nest area 7 has no
+        cells. Published: https://claude.ai/artifact/EAdHuwxLw1i2V2bnkK9kBd)
+  - [ ] James's first review (2026-11-22; requirements F3 amended):
+        spikes/coral, acid and the slowing liquid by collision bit in slots
+        1, 5 and 3 everywhere (`tile_choices`, `bg_merge` 1→0, 3→2, 5→6); a
+        `bubbles` set on metatile table 2; areas 3-8 and the Queen recoloured;
+        Samus's suit and visor in OBJ palettes 1 and 7 through her own
+        attribute page (4), reloaded on Varia. The five pages moved out of
+        the engine into the `slots` class's blob 2 at `PutAttrOp`'s operand,
+        for room. Approved by James 2026-11-22, pending the playtest.
+  - [ ] Enemy palettes (James, 2026-11-22): two shared OBJ palettes after
+        the Metroid II / Samus Returns enemy art, 5 "organic" (reds and
+        pinks: Moheek, Tsumuri, Ramulken, Gullug, Drivel, Arachnus's body)
+        and 0 "shell" (ivory, tan, brown: Autoad, Autom, Moto, Halzyn, the
+        Metroids' shells), with palette 4's green for green parts (Hornoad,
+        Arachnus's shell, Wallfire). Varia's shoulders (slot 0 of her sheet)
+        move to her suit palette on her page. Where EJRTQ's slot puts an
+        enemy's part in the wrong one, a sprite hand choice in
+        `full_assign.zig` (as `tile_choices`), each enemy checked by eye in
+        Mesen. Add an enemy row to the swatch sheet.
+        (Started: palettes 0 and 5 recoloured, Varia's shoulders on her page;
+        `zig build swatch-full` also writes `enemy-swatches.html`, every
+        sprite sheet from the ROM in its palettes,
+        https://claude.ai/artifact/5Zu3ZgSzFfnWS2nWReDbF5. EJRTQ also puts
+        enemy parts in palettes 3 (ice) and 6 (beams).)
   - [ ] Commit: "full: Samus Returns colours".
 
 - [ ] **Step 10: Gate rungs**

@@ -463,3 +463,54 @@ test "a Start held through the reboot does not leave the title, and a fresh one 
     _ = try m.runFrames(60, .{});
     try testing.expect(m.read(game_mode_addr) != 0x01);
 }
+
+/// The cart's erase (`DeathErase`, sprite editor Step 2): Game Boy byte `n` of
+/// $8000-$87FF as the two bytes of SNES object characters, from their base,
+/// that hold it: byte `n & $0F` of the 32-byte tile `n >> 4` (planes 0 and 1),
+/// and the same byte sixteen on (planes 2 and 3).
+pub fn eraseBytes(n: u16) [2]u16 {
+    const at = (n >> 4) * 32 + (n & 0x0F);
+    return .{ at, at + 16 };
+}
+
+test "the erase's byte map keeps every pixel's shade, planes 2 and 3 with it" {
+    // One stride, two Game Boy tiles, and its 4bpp copy with planes 2 and 3
+    // set as an edited tile's are: every pixel's index has bits 2 and 3.
+    var gb: [32]u8 = undefined;
+    for (&gb, 0..) |*b, i| b.* = @truncate(i *% 0x9D +% 0x35);
+    var snes: [64]u8 = undefined;
+    for (0..2) |t| {
+        @memcpy(snes[t * 32 ..][0..16], gb[t * 16 ..][0..16]);
+        @memset(snes[t * 32 + 16 ..][0..16], 0xFF);
+    }
+    const pixel = struct {
+        fn gbAt(tile: []const u8, r: usize, c: usize) u8 {
+            const b: u3 = @intCast(7 - c);
+            return ((tile[r * 2 + 1] >> b) & 1) << 1 | ((tile[r * 2] >> b) & 1);
+        }
+        fn snesAt(tile: []const u8, r: usize, c: usize) u8 {
+            return gbAt(tile[0..16], r, c) | gbAt(tile[16..32], r, c) << 2;
+        }
+    };
+    // The table's 32 offsets, in an order that is not the bytes'.
+    var gone = [_]bool{false} ** 32;
+    for (0..32) |s| {
+        const d: u16 = @intCast((s * 13) % 32);
+        gb[d] = 0;
+        gone[d] = true;
+        for (eraseBytes(d)) |at| snes[at] = 0;
+        for (0..2) |t| for (0..8) |r| for (0..8) |c| {
+            const g = pixel.gbAt(gb[t * 16 ..][0..16], r, c);
+            const x = pixel.snesAt(snes[t * 32 ..][0..32], r, c);
+            try std.testing.expectEqual(g, x & 3);
+            // A pixel the erase has cleared both Game Boy planes of is
+            // transparent here too, not one of the variants.
+            const row_gone = gone[t * 16 + r * 2] and gone[t * 16 + r * 2 + 1];
+            if (row_gone) try std.testing.expectEqual(@as(u8, 0), x);
+        };
+    }
+    for (snes) |b| try std.testing.expectEqual(@as(u8, 0), b);
+    // And the stride is two SNES tiles: Game Boy byte $20 starts the next.
+    try std.testing.expectEqual([2]u16{ 64, 80 }, eraseBytes(0x20));
+    try std.testing.expectEqual([2]u16{ 32 + 5, 48 + 5 }, eraseBytes(0x15));
+}

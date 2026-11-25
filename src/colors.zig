@@ -77,8 +77,8 @@ pub fn tables(scheme: Scheme) Tables {
         .full => .{
             .bg = full.bg[areas.setOf(.{ .area = .surface })][0],
             .window = full.window[0],
-            .obp0 = full.obj[0],
-            .obp1 = full.obj[1],
+            .obp0 = base(full.obj[0]),
+            .obp1 = base(full.obj[1]),
         },
     };
 }
@@ -92,6 +92,25 @@ pub const Slots = [slot_count]Table;
 /// step 0 is slot 2's own colours, so `Full.damage` holds steps 1-3.
 pub const damage_steps = 4;
 
+/// An object palette's sixteen colours (sprite editor Step 2): four variants
+/// of four shades, variant-major, each variant shade-indexed like a `Table`.
+/// Entry `i` is shade `i & 3` of variant `i >> 2`, so a 4bpp pixel's low two
+/// bits, which are the Game Boy's, pick its shade in every variant.
+pub const Table16 = [16]u16;
+pub const variants = 4;
+
+/// Variant 0: the four colours every scheme's grader and `mono`/`gbc` know.
+pub fn base(t: Table16) Table {
+    return t[0..4].*;
+}
+
+/// Every table's variant 0, for pages that show one row a palette.
+pub fn bases(comptime n: usize, ts: [n]Table16) [n]Table {
+    var out: [n]Table = undefined;
+    for (ts, &out) |t, *o| o.* = base(t);
+    return out;
+}
+
 /// `full`'s colours, all shade-indexed like every other table here. The
 /// background's are per colour set (`areas.setOf`), the window's and the
 /// objects' global. Every BG slot's shade 3 is black: BGP `$93` puts it at
@@ -100,64 +119,87 @@ pub const Full = struct {
     bg: [areas.set_count]Slots,
     /// One per pair of slots, `snes_target.hud_palette` on.
     window: [target.window_palettes]Table,
-    obj: Slots,
+    obj: [slot_count]Table16,
     /// OBJ palette 2 at damage steps 1-3, outside the Queen's room.
-    damage: [damage_steps - 1]Table,
+    damage: [damage_steps - 1]Table16,
+    /// Samus's suit and visor palettes (`full_slots.samus_suit_palette`,
+    /// `samus_visor_palette`), Power then Varia (colorization Step 9).
+    suits: [2][2]Table16,
 };
 
-/// Placeholder colours (colorization Step 8): a distinct hue per colour set,
-/// stepped a little per slot. Step 9 replaces them with Samus Returns'.
+/// `full`'s colours, as `src/data/full_colors.zon` holds them: that file is
+/// where they are chosen, and its comments say what each one is for.
 pub const full: Full = blk: {
     @setEvalBranchQuota(100_000);
+    const d = full_data;
     var f: Full = undefined;
-    for (0..areas.set_count) |s| for (0..slot_count) |i| {
-        f.bg[s][i] = placeholderRamp(@intCast((s * 360 / areas.set_count + i * 5) % 360));
+    for (d.bg, &f.bg) |set, *out| for (set, out) |t, *o| {
+        o.* = fromRgb(t);
     };
-    for (0..target.window_palettes) |i| f.window[i] = placeholderRamp(@intCast(220 + i * 12));
-    for (0..slot_count) |i| f.obj[i] = placeholderRamp(@intCast((i * 45 + 20) % 360));
-    // Slot 4, a Metroid's body (hue 200), round through magenta to red.
-    for (0..damage_steps - 1, [_]u16{ 280, 320, 0 }) |k, h| f.damage[k] = placeholderRamp(h);
+    for (d.window, &f.window) |t, *o| o.* = fromRgb(t);
+    for (d.damage, &f.damage) |t, *o| o.* = fromRgb16(t);
+    for (d.suits, &f.suits) |pair, *o| o.* = .{ fromRgb16(pair[0]), fromRgb16(pair[1]) };
+    // A null object palette is a suit's: Samus's body and visor take the Power
+    // suit's colours there (`full_slots.samus_suit_palette`,
+    // `samus_visor_palette`), and `FullSuitLoad` swaps them per suit.
+    for (d.obj, &f.obj, 0..) |t, *o, i| o.* = if (t) |rgb| fromRgb16(rgb) else switch (i) {
+        1 => f.suits[0][0],
+        7 => f.suits[0][1],
+        else => @compileError("full_colors.zon: only object palettes 1 and 7 (the suit's) may be null"),
+    };
     break :blk f;
 };
 
-/// Four shades of one hue, lightest first, shade 3 black.
-fn placeholderRamp(hue: u16) Table {
-    return .{ hsv(hue, 35, 31), hsv(hue, 80, 24), hsv(hue, 100, 13), 0 };
+/// A table as `full_colors.zon` writes it: four 0xRRGGBB colours.
+pub const Rgb = [4]u24;
+/// An object palette as `full_colors.zon` writes it: its four variants.
+pub const Rgb16 = [variants]Rgb;
+
+/// `full_colors.zon`'s shape: `Full`'s, in 0xRRGGBB.
+pub const FullData = struct {
+    bg: [areas.set_count][slot_count]Rgb,
+    window: [target.window_palettes]Rgb,
+    obj: [slot_count]?Rgb16,
+    damage: [damage_steps - 1]Rgb16,
+    suits: [2][2]Rgb16,
+};
+
+pub const full_data: FullData = @import("data/full_colors.zon");
+
+fn fromRgb(t: Rgb) Table {
+    return .{ bgr555(t[0]), bgr555(t[1]), bgr555(t[2]), bgr555(t[3]) };
 }
 
-/// A BGR555 colour from a hue in degrees, a saturation in percent and a 5-bit
-/// value.
-fn hsv(hue: u32, sat: u32, val: u32) u16 {
-    const sector = hue / 60;
-    const f = hue % 60;
-    const p = val * (100 - sat) / 100;
-    const q = val * (100 * 60 - sat * f) / (100 * 60);
-    const t = val * (100 * 60 - sat * (60 - f)) / (100 * 60);
-    const rgb: [3]u32 = switch (sector) {
-        0 => .{ val, t, p },
-        1 => .{ q, val, p },
-        2 => .{ p, val, t },
-        3 => .{ p, q, val },
-        4 => .{ t, p, val },
-        else => .{ val, p, q },
-    };
-    return @intCast(rgb[0] | (rgb[1] << 5) | (rgb[2] << 10));
+fn fromRgb16(t: Rgb16) Table16 {
+    var out: Table16 = undefined;
+    for (t, 0..) |row, v| out[v * 4 ..][0..4].* = fromRgb(row);
+    return out;
+}
+
+/// An RGB888 colour (0xRRGGBB) as BGR555.
+pub fn bgr555(rgb: u24) u16 {
+    const r: u16 = @intCast((rgb >> 16) >> 3);
+    const g: u16 = @intCast(((rgb >> 8) & 0xFF) >> 3);
+    const b: u16 = @intCast((rgb & 0xFF) >> 3);
+    return r | (g << 5) | (b << 10);
 }
 
 /// Words in one colour set's part of the cart's `full` table: BG3's 8
 /// palettes of 4.
 pub const full_set_words = slot_count * 4;
-/// Words in the table's global part: the window's palettes, the objects' 8,
-/// and the damage steps.
-pub const full_global_words = (@as(usize, target.window_palettes) + slot_count + damage_steps - 1) * 4;
+/// Words in the table's global part, sixteen a palette: the window's
+/// palettes, the objects' 8, the damage steps, and the two suits' body and
+/// visor. The window's are BG2's, which draws object characters (the HUD's,
+/// the Queen's head), so a 4bpp pixel shows there too.
+pub const full_global_words = (@as(usize, target.window_palettes) + slot_count + damage_steps - 1 + 4) * 16;
 pub const full_table_words = areas.set_count * full_set_words + full_global_words;
 
 /// The cart's `full` table, as `LoadPalette` reads it: every colour set's BG3
-/// palettes through `live_bgp`, then the window's through `live_bgp`, the
-/// objects' through `live_obp0` and the damage steps through `live_obp0`.
-/// Every object palette takes OBP0's register: as EJRTQ's palettes ignore
-/// the registers, an OBP1 object changes palette (the OBP1 swap) and not
-/// register.
+/// palettes through `live_bgp`, then the window's through `live_bgp` four
+/// times over (it has no variants), the objects' through `live_obp0` and the
+/// damage steps through `live_obp0`. Every object palette takes OBP0's
+/// register: as EJRTQ's palettes ignore the registers, an OBP1 object changes
+/// palette (the OBP1 swap) and not register.
 pub fn fullTable() [full_table_words]u16 {
     var out: [full_table_words]u16 = undefined;
     var n: usize = 0;
@@ -166,14 +208,22 @@ pub fn fullTable() [full_table_words]u16 {
         n += 4;
     };
     for (full.window) |t| {
-        out[n..][0..4].* = apply(t, screens.live_bgp);
-        n += 4;
+        out[n..][0..16].* = apply16(t ++ t ++ t ++ t, screens.live_bgp);
+        n += 16;
     }
-    for (full.obj ++ full.damage) |t| {
-        out[n..][0..4].* = apply(t, screens.live_obp0);
-        n += 4;
+    for (full.obj ++ full.damage ++ full.suits[0] ++ full.suits[1]) |t| {
+        out[n..][0..16].* = apply16(t, screens.live_obp0);
+        n += 16;
     }
     std.debug.assert(n == full_table_words);
+    return out;
+}
+
+/// `apply` on each variant: CGRAM entry `i` is the colour of the shade the
+/// register's field `i & 3` names, in variant `i >> 2`.
+pub fn apply16(table: Table16, reg: u8) Table16 {
+    var out: Table16 = undefined;
+    for (0..variants) |v| out[v * 4 ..][0..4].* = apply(table[v * 4 ..][0..4].*, reg);
     return out;
 }
 
@@ -221,7 +271,17 @@ pub fn cgramWords(scheme: Scheme) [16]u16 {
 /// back as a shade without knowing which layer drew it, which only works if
 /// no colour stands for two shades (`uniqueShades`).
 pub fn shadeOf(scheme: Scheme, colour: u16) ?u2 {
-    return shadeIn(tables(scheme), colour);
+    if (shadeIn(tables(scheme), colour)) |s| return s;
+    // `full`'s object palettes have variants: entry `i` is shade `i & 3`.
+    if (scheme == .full) return shadeIn16(&(full.obj ++ full.damage ++ full.suits[0] ++ full.suits[1]), colour);
+    return null;
+}
+
+/// The shade `colour` stands for in any of `ts`, as an object pixel's entry
+/// `i` stands for shade `i & 3` whichever variant it is in.
+pub fn shadeIn16(ts: []const Table16, colour: u16) ?u2 {
+    for (ts) |t| for (t, 0..) |c, i| if (c == colour) return @intCast(i & 3);
+    return null;
 }
 
 fn shadeIn(t: Tables, colour: u16) ?u2 {
@@ -373,24 +433,60 @@ test "full's table: every set's slots, then the window, the objects and the dama
     };
     const g = areas.set_count * full_set_words;
     try std.testing.expectEqualSlices(u16, &apply(full.window[1], screens.live_bgp), t[g + 4 ..][0..4]);
-    const o = g + @as(usize, target.window_palettes) * 4;
-    try std.testing.expectEqualSlices(u16, &apply(full.obj[3], screens.live_obp0), t[o + 12 ..][0..4]);
-    try std.testing.expectEqualSlices(u16, &apply(full.damage[2], screens.live_obp0), t[o + slot_count * 4 + 8 ..][0..4]);
+    const o = g + @as(usize, target.window_palettes) * 16;
+    // The window's four colours, four times: no variants.
+    for (0..variants) |v| try std.testing.expectEqualSlices(u16, &apply(full.window[1], screens.live_bgp), t[g + 16 + v * 4 ..][0..4]);
+    try std.testing.expectEqualSlices(u16, &apply16(full.obj[3], screens.live_obp0), t[o + 3 * 16 ..][0..16]);
+    try std.testing.expectEqualSlices(u16, &apply16(full.damage[2], screens.live_obp0), t[o + (slot_count + 2) * 16 ..][0..16]);
+    const s = o + (slot_count + damage_steps - 1) * 16;
+    try std.testing.expectEqualSlices(u16, &apply16(full.suits[1][0], screens.live_obp0), t[s + 2 * 16 ..][0..16]);
+    try std.testing.expectEqual(full_table_words, s + 4 * 16);
+    // A synthetic object palette with distinct variants: the register maps
+    // each variant's fields, and never mixes variants.
+    var syn: Table16 = undefined;
+    for (&syn, 0..) |*c, i| c.* = @intCast(i);
+    try std.testing.expectEqualSlices(u16, &.{ 3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14 }, &apply16(syn, screens.live_obp0));
     // A synthetic slot: BGP $93 puts shade 3 at colour 0, the backdrop.
     try std.testing.expectEqualSlices(u16, &.{ 4, 1, 2, 3 }, &apply(.{ 1, 2, 3, 4 }, screens.live_bgp));
 }
 
-test "full: colour 0 of every BG palette is black, and shade 3 is each slot's darkest" {
-    const t = fullTable();
-    for (0..areas.set_count * slot_count + target.window_palettes) |p| {
-        try std.testing.expectEqual(@as(u16, 0), t[p * 4]);
-    }
-    const all = [_][]const Table{ &full.window, &full.obj, &full.damage };
-    for (full.bg) |set| for (set) |slot| for (slot[0..3]) |c| try std.testing.expect(luma(slot[3]) <= luma(c));
-    for (all) |ts| for (ts) |slot| for (slot[0..3]) |c| try std.testing.expect(luma(slot[3]) <= luma(c));
+test "full_colors.zon: every colour is one the SNES shows, written as rgb888 writes it" {
+    const d = full_data;
+    const all16 = [_][]const Rgb16{ &d.damage, &d.suits[0], &d.suits[1] };
+    for (d.bg) |set| for (set) |t| for (t) |c| try std.testing.expectEqual(rgb888(bgr555(c)), c);
+    for (d.window) |t| for (t) |c| try std.testing.expectEqual(rgb888(bgr555(c)), c);
+    for (all16) |ts| for (ts) |t| for (t) |row| for (row) |c| try std.testing.expectEqual(rgb888(bgr555(c)), c);
+    for (d.obj) |o| if (o) |t| for (t) |row| for (row) |c| try std.testing.expectEqual(rgb888(bgr555(c)), c);
 }
 
-test "full's placeholder sets are told apart" {
+test "full: colour 0 of every BG palette is black, and shade 3 is each slot's darkest" {
+    const t = fullTable();
+    for (0..areas.set_count * slot_count) |p| try std.testing.expectEqual(@as(u16, 0), t[p * 4]);
+    const g = areas.set_count * full_set_words;
+    for (0..@as(usize, target.window_palettes) * variants) |p| try std.testing.expectEqual(@as(u16, 0), t[g + p * 4]);
+    for (full.bg) |set| for (set) |slot| for (slot[0..3]) |c| try std.testing.expect(luma(slot[3]) <= luma(c));
+    for (full.window) |slot| for (slot[0..3]) |c| try std.testing.expect(luma(slot[3]) <= luma(c));
+    // An object variant's shade 3 lands on colour 0, 4, 8 or 12 through OBP0
+    // `$93`: transparent or never drawn. It stays black so nothing reads as
+    // though it were shown.
+    const all16 = [_][]const Table16{ &full.obj, &full.damage, &full.suits[0], &full.suits[1] };
+    for (all16) |ts| for (ts) |slot| for (0..variants) |v| try std.testing.expectEqual(@as(u16, 0), slot[v * 4 + 3]);
+}
+
+test "full: a grader reads any object variant's colour as its shade" {
+    // Distinct variants, as an edited palette has: entry `i` is shade `i & 3`.
+    var syn: Table16 = undefined;
+    for (&syn, 0..) |*c, i| c.* = @intCast(0x100 + i);
+    for (syn, 0..) |c, i| try std.testing.expectEqual(@as(?u2, @intCast(i & 3)), shadeIn16(&.{syn}, c));
+    try std.testing.expectEqual(@as(?u2, null), shadeIn16(&.{syn}, 0x7FFF));
+    // And `full`'s own: every object colour, in every variant, is a shade.
+    for (full.obj) |t| for (t, 0..) |c, i| {
+        if (i & 3 == 3) continue; // black, which BG shade 3 is too
+        try std.testing.expect(shadeOf(.full, c) != null);
+    };
+}
+
+test "full's colour sets are told apart" {
     for (0..areas.set_count) |a| for (a + 1..areas.set_count) |b| {
         try std.testing.expect(!std.mem.eql(u16, &full.bg[a][0], &full.bg[b][0]));
     };
@@ -401,9 +497,10 @@ test "full's placeholder sets are told apart" {
     const t = fullTable();
     const surf = areas.setOf(.{ .area = .surface }) * full_set_words;
     const g = areas.set_count * full_set_words;
-    const o = g + @as(usize, target.window_palettes) * 4;
+    const o = g + @as(usize, target.window_palettes) * 16;
     try std.testing.expectEqualSlices(u16, t[surf..][0..4], f[0..4]);
     try std.testing.expectEqualSlices(u16, t[g..][0..4], f[4..8]);
-    try std.testing.expectEqualSlices(u16, t[o..][0..8], f[8..16]);
+    try std.testing.expectEqualSlices(u16, t[o..][0..4], f[8..12]);
+    try std.testing.expectEqualSlices(u16, t[o + 16 ..][0..4], f[12..16]);
     for ([_]Scheme{ .mono, .gbc }) |s| try std.testing.expect(!std.mem.eql(u16, &f, &cgramWords(s)));
 }

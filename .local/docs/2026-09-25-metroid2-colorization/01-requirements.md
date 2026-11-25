@@ -11,6 +11,7 @@ updated:
   - 2026-11-21T19:37:57Z
   - 2026-11-22T04:09:57Z
   - 2026-11-22T06:54:13Z
+  - 2026-11-22T17:52:43Z
 working_directory: /Users/james/git/m2snes
 ---
 
@@ -126,10 +127,25 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
   screenshots in `~/Pictures/screenshots/metroid-ros-reference/`. No colour
   is sampled from EJRTQ. The screenshots are not committed.
 - **Per area:** each area has one 4-colour table per BG slot it uses,
-  inspired by its paired Samus Returns area.
+  inspired by its paired Samus Returns area. By Metroid II's numbers
+  (amended 2026-11-22, James): area 3 greens and browns (Chozo ruins); 4
+  greys and blues with a little purple; 5 greens and organics with red
+  accents; 6 browns and oranges; 7 the lab, greys and blues with green
+  accents; 8 dark teal caves with olive (Samus Returns' area 8 picture).
+- **The Queen's room:** shades of green, like a Metroid nest (amended
+  2026-11-22).
+- **Bubbles** (amended 2026-11-22): rooms that load the bubble tiles take a
+  colour set of their own, after Super Metroid's Bubble Mountain, wherever
+  they are. Precedence: queen > bubbles > nest > acid > area.
 - **Samus** uses Samus Returns' colours: the Power Suit, and the Varia Suit
-  after it is collected. Her colours are the same in every area.
+  after it is collected. Her colours are the same in every area. (Amended
+  2026-11-22: the Power Suit orange-gold with a blue visor, the Varia Suit
+  red with a green visor. Her suit and visor draw in sprite palettes no
+  other sprite uses.)
 - **Other sprites:** Metroids, enemies, beams and drops, per OBJ slot.
+  (Amended 2026-11-22, James: enemies share one or two palettes whose
+  colours follow the Metroid II / Samus Returns enemy art, with per-enemy
+  hand choices where a part lands in the wrong one.)
 - **HUD:** its own palette(s), legible in every area: blue with white text,
   as Samus Returns' message boxes (`2.40.27`). The item-name window uses the
   same.
@@ -139,9 +155,13 @@ A dedicated tool, run by hand (a `zig build` step), not part of `verify` or
   Metroid rooms
   (`2.46.33`, `3.04.25`, `3.16.21`).
 - **Damaging tiles** (corals, spikes: tiles the ROM's damage data marks as
-  hurting Samus): strongly red, as Samus Returns' corals (`2.56.04`). They
-  take a slot of their own, overriding EJRTQ's, where the tileset has one
-  free; design reports any tileset where they can't.
+  hurting Samus): strongly red, as Samus Returns' corals (`2.56.04`).
+  (Amended 2026-11-22, James: the same everywhere.) Each tile kind the ROM's
+  collision bits mark is drawn the same in every area, in a slot of its
+  own: spikes and coral red, acid purple, the liquid that slows Samus
+  yellow. Every tileset's other tiles move out of those three slots
+  (overriding EJRTQ's slots). The ROM marks no water that doesn't slow
+  Samus, so there is no blue-water slot.
 - **Look-alike slots** get identical colours wherever F2 says they must, so
   hidden passages stay hidden.
 - **Colour 0** is black in every BG slot. SNES BG3 colour 0 shows the shared

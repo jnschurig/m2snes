@@ -10,6 +10,10 @@
 //!
 //! It holds slot numbers and tile ids only: no colours and no ROM bytes.
 //! A slot is 0-7. The colours each slot gets are `colors.zig`'s.
+//!
+//! A sprite tile's slot here is its derived one: the sprite editor's
+//! `src/data/sprite_edits.zon` may override it per unique tile
+//! (`full_slots.blob`).
 
 const std = @import("std");
 
@@ -398,25 +402,43 @@ const af_why = "the blank's own slot; EJRTQ's other ids at $AF positions are dig
 /// they are drawn in `slot` whatever the derived slot says.
 pub const TileChoice = struct { region: []const u8, tiles: []const u8, slot: u3, why: []const u8 };
 
-/// Spikes, the tiles a tileset's collision table marks as hurting Samus
-/// (bit 3, `00:$2021`), each tileset's in a slot no other background tile
-/// of it uses, so the `full` scheme can draw them red (colorization F3).
-/// The tile is the id: a tileset's graphics land at `$9000`, ids `$00-$7F`.
-/// Free means unused by the tileset's other tiles, by its acid tiles, by
-/// `$FF` (the only common item tile the background shows) and, on the
-/// surface, by `gfx_surfaceSPR`'s tiles `$BA-$EF` its metatiles draw.
-/// `full_slots`' tests hold every claim here against the ROM.
-///
-/// `ruinsExt` has none free: its acid tiles alone use slot 5, and the rest
-/// use the other seven. Its spikes keep their derived slots.
+/// The kinds of background tile `full` draws the same everywhere
+/// (colorization F3, amended 2026-11-22), each in a slot of its own: the tiles
+/// a tileset's collision table marks as hurting Samus (bit 3, `00:$2021`:
+/// spikes and coral, red), as acid (bit 4, `00:$1EC5`: purple) and as the
+/// liquid that slows her (bit 0, `00:$1EB5`: yellow). A tile with two bits
+/// takes the first of those. The tile is the id: a tileset's graphics land at
+/// `$9000`, ids `$00-$7F`. `full_slots`' tests hold the lists against the ROM.
+pub const spike_slot: u3 = 1;
+pub const acid_slot: u3 = 5;
+pub const liquid_slot: u3 = 3;
+
+/// Every other background tile leaves those three slots: where its derived
+/// slot is one, it is drawn in this one instead (`full_slots.bgSlot`). So
+/// 1 joins 0, 3 joins 2 and 5 joins 6. Objects keep their derived slots.
+pub const bg_merge = [8]u3{ 0, 0, 2, 2, 4, 6, 6, 7 };
+
 pub const tile_choices = [_]TileChoice{
-    .{ .region = "gfx_plantBubbles", .tiles = &.{ 0x1C, 0x1D, 0x1E, 0x1F, 0x26, 0x27, 0x28, 0x29, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x61, 0x62 }, .slot = 1, .why = spike_why },
-    .{ .region = "gfx_ruinsInside", .tiles = &.{ 0x15, 0x16, 0x19, 0x1A }, .slot = 5, .why = spike_why },
-    .{ .region = "gfx_surfaceBG", .tiles = &.{ 0x59, 0x5A, 0x5B, 0x5E, 0x60, 0x61, 0x62, 0x63 }, .slot = 1, .why = spike_why },
-    .{ .region = "gfx_lavaCavesA", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 2, .why = spike_why },
-    .{ .region = "gfx_lavaCavesB", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 1, .why = spike_why },
-    .{ .region = "gfx_lavaCavesC", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = 3, .why = spike_why },
-    .{ .region = "gfx_finalLab", .tiles = &.{ 0x3A, 0x42, 0x43, 0x6B }, .slot = 5, .why = spike_why },
+    .{ .region = "gfx_plantBubbles", .tiles = &.{ 0x1C, 0x1D, 0x1E, 0x1F, 0x26, 0x27, 0x28, 0x29, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x61, 0x62 }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_plantBubbles", .tiles = &.{ 0x67, 0x68, 0x70, 0x71, 0x72, 0x73 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_ruinsInside", .tiles = &.{ 0x15, 0x16, 0x19, 0x1A }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_caveFirst", .tiles = &.{ 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x5E, 0x5F, 0x6D, 0x74, 0x75, 0x76, 0x77 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_surfaceBG", .tiles = &.{ 0x59, 0x5A, 0x5B, 0x5E, 0x60, 0x61, 0x62, 0x63 }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_lavaCavesA", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_lavaCavesA", .tiles = &.{ 0x11, 0x12, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x24, 0x25, 0x26, 0x27, 0x2C, 0x2D, 0x2E, 0x2F, 0x31, 0x36, 0x37, 0x38, 0x39, 0x46, 0x48, 0x4A, 0x4F, 0x50, 0x51, 0x52 }, .slot = acid_slot, .why = acid_why },
+    .{ .region = "gfx_lavaCavesA", .tiles = &.{ 0x15, 0x16, 0x42, 0x43, 0x44, 0x45 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_lavaCavesB", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_lavaCavesB", .tiles = &.{ 0x11, 0x12, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x24, 0x25, 0x26, 0x27, 0x2C, 0x2D, 0x2E, 0x2F, 0x31, 0x36, 0x37, 0x38, 0x39, 0x46, 0x48, 0x4A, 0x4F, 0x50, 0x51, 0x52 }, .slot = acid_slot, .why = acid_why },
+    .{ .region = "gfx_lavaCavesB", .tiles = &.{ 0x15, 0x16, 0x42, 0x43, 0x44, 0x45 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_lavaCavesC", .tiles = &.{ 0x3A, 0x3B, 0x3C, 0x3D }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_lavaCavesC", .tiles = &.{ 0x11, 0x12, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x24, 0x25, 0x26, 0x27, 0x2C, 0x2D, 0x2E, 0x2F, 0x31, 0x36, 0x37, 0x38, 0x39, 0x46, 0x48, 0x4A, 0x4F, 0x50, 0x51, 0x52 }, .slot = acid_slot, .why = acid_why },
+    .{ .region = "gfx_lavaCavesC", .tiles = &.{ 0x15, 0x16, 0x42, 0x43, 0x44, 0x45 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_ruinsExt", .tiles = &.{ 0x0C, 0x0D, 0x0E, 0x0F, 0x14, 0x15, 0x27, 0x28, 0x29, 0x2A, 0x38, 0x39 }, .slot = spike_slot, .why = spike_why },
+    .{ .region = "gfx_ruinsExt", .tiles = &.{ 0x3A, 0x3B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63 }, .slot = acid_slot, .why = acid_why },
+    .{ .region = "gfx_ruinsExt", .tiles = &.{ 0x54, 0x55, 0x70, 0x71, 0x72, 0x73 }, .slot = liquid_slot, .why = liquid_why },
+    .{ .region = "gfx_finalLab", .tiles = &.{ 0x3A, 0x42, 0x43, 0x6B }, .slot = spike_slot, .why = spike_why },
 };
 
-const spike_why = "a spike: its own slot, so the full scheme can draw it red";
+const spike_why = "a spike or coral: red in every area";
+const acid_why = "acid: purple in every area";
+const liquid_why = "the liquid that slows Samus: yellow in every area";

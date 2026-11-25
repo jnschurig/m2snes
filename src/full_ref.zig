@@ -551,6 +551,10 @@ const preamble =
     \\//!
     \\//! It holds slot numbers and tile ids only: no colours and no ROM bytes.
     \\//! A slot is 0-7. The colours each slot gets are `colors.zig`'s.
+    \\//!
+    \\//! A sprite tile's slot here is its derived one: the sprite editor's
+    \\//! `src/data/sprite_edits.zon` may override it per unique tile
+    \\//! (`full_slots.blob`).
     \\
     \\const std = @import("std");
     \\

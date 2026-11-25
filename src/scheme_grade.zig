@@ -173,7 +173,7 @@ fn ops(run: Run) []const Op {
 
 /// A slot that holds a game: the magic and the ROM's new-game record, as the
 /// game's own writer leaves a slot it saves.
-fn gameRecord(rom: []const u8) ![save.record_len]u8 {
+pub fn gameRecord(rom: []const u8) ![save.record_len]u8 {
     const e = offsets.find("initial_save") orelse return error.NoInitialSave;
     var r: [save.record_len]u8 = undefined;
     @memcpy(r[0..save.magic_len], &save.magic);

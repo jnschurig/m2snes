@@ -5824,9 +5824,13 @@ pub fn writeDeathBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot
         \\  return true
         \\end
         \\
+        \\-- A Game Boy byte `n` is byte `n & $0F` of SNES tile `n >> 4`, and planes 2
+        \\-- and 3 are sixteen on (`death.eraseBytes`, sprite editor Step 2).
         \\local function stride(v)
         \\  for k = 0, STRIDES - 1 do
-        \\    if emu.read(OBJ_VRAM + v + k * STRIDE, vram) ~= 0 then return false end
+        \\    local n = k * STRIDE + v
+        \\    local at = OBJ_VRAM + (n >> 4) * 32 + (n & 0x0F)
+        \\    if emu.read(at, vram) ~= 0 or emu.read(at + 16, vram) ~= 0 then return false end
         \\  end
         \\  return true
         \\end
@@ -5902,7 +5906,7 @@ pub fn writeDeathBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot
         \\    emu.write(TITLE.sel, 0x01, wram)
         \\    d = {{ at = since }}
         \\    local any = false
-        \\    for i = 0, 0x7FF do if emu.read(OBJ_VRAM + i, vram) ~= 0 then any = true break end end
+        \\    for i = 0, 0xFFF do if emu.read(OBJ_VRAM + i, vram) ~= 0 then any = true break end end
         \\    if not any then emu.stop(184) end
         \\    phase = 3
         \\    return
@@ -5945,7 +5949,7 @@ pub fn writeDeathBoot(gpa: std.mem.Allocator, rom: []const u8, boot: screen.Boot
         \\      d.dead = now
         \\      report("dying", d.dead - d.dying)
         \\      if not close(d.dead - d.dying, GB.dying) then emu.stop(183) end
-        \\      for i = 0, 0x7FF do if emu.read(OBJ_VRAM + i, vram) ~= 0 then emu.stop(184) end end
+        \\      for i = 0, 0xFFF do if emu.read(OBJ_VRAM + i, vram) ~= 0 then emu.stop(184) end end
         \\      hold = nil
         \\      return
         \\    end

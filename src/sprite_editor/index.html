@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- The sprite editor's page (sprite-pixel-editor F3-F6), served by
+     `zig build sprite-editor`. It holds no ROM bytes: the tiles come from
+     the server's /api/model. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m2snes sprite editor</title>
+<style>
+:root { --bg:#f3f4f7; --card:#ffffff; --fg:#16181f; --muted:#5b6070; --line:#d9dce5; --accent:#2f6fd8; --warn:#b4540a; --ground:#22262e;
+  --body:system-ui,sans-serif; --mono:ui-monospace,"SF Mono",Menlo,monospace }
+@media (prefers-color-scheme: dark) { :root { --bg:#0f1116; --card:#181b22; --fg:#e8eaf0; --muted:#9aa0b0; --line:#2a2f3a; --accent:#6ea2ff; --warn:#f0a050; color-scheme:dark } }
+* { box-sizing:border-box }
+html, body { height:100%; margin:0 }
+body { background:var(--bg); color:var(--fg); font:13px/1.45 var(--body) }
+button, select, input { font:inherit }
+#app { height:100%; display:grid; grid-template-columns:260px minmax(0,1fr) 300px; grid-template-rows:auto minmax(0,1fr) 190px;
+  grid-template-areas:"bar bar bar" "list main side" "list uses side" }
+.loading { padding:24px }
+#bar { grid-area:bar; display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--card) }
+#bar h1 { font-size:14px; margin:0 8px 0 0 }
+#bar label { display:flex; gap:4px; align-items:center; color:var(--muted) }
+#bar .spacer { flex:1 }
+#list { grid-area:list; border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; background:var(--card) }
+#list input[type=search] { margin:8px; padding:4px 6px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg) }
+#groups { overflow:auto; padding:0 4px 12px }
+#groups details { margin:0 }
+#groups summary { cursor:pointer; padding:3px 6px; font-weight:600; border-radius:4px }
+#groups summary .n { color:var(--muted); font-weight:400; font-family:var(--mono); font-size:11px }
+#groups .head { margin:12px 6px 2px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted) }
+#groups button.item { display:block; width:100%; text-align:left; border:0; background:none; color:inherit; padding:2px 6px 2px 20px; border-radius:4px; cursor:pointer }
+#groups button.item:hover { background:var(--bg) }
+#groups button.item.sel { background:var(--accent); color:#fff }
+#groups button.item .id { font-family:var(--mono); font-size:11px; opacity:.7; margin-right:6px }
+#main { grid-area:main; display:flex; flex-direction:column; min-height:0; min-width:0 }
+#title { display:flex; gap:10px; align-items:baseline; padding:10px 14px 4px }
+#title h2 { margin:0; font-size:16px }
+#title .sub { color:var(--muted); font-family:var(--mono); font-size:11px }
+#stage { flex:1; overflow:auto; display:grid; place-items:center; padding:12px; min-height:0 }
+#stage canvas { image-rendering:pixelated; cursor:crosshair; border-radius:4px }
+#stage .none { color:var(--muted); max-width:44ch; text-align:center }
+#status { padding:4px 14px 8px; color:var(--muted); font-family:var(--mono); font-size:11px; min-height:2.4em }
+#uses { grid-area:uses; border-top:1px solid var(--line); display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--card) }
+#uses h3, #side h3 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600 }
+#uses h3 { padding:8px 12px 4px }
+#strip { flex:1; overflow:auto; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start; padding:4px 12px 12px }
+#strip figure { margin:0; display:grid; gap:2px; justify-items:center; cursor:pointer; padding:3px; border-radius:4px }
+#strip figure:hover { background:var(--bg) }
+#strip figure.sel { outline:2px solid var(--accent) }
+#strip canvas { image-rendering:pixelated; border-radius:3px }
+#strip figcaption { font-family:var(--mono); font-size:10px; color:var(--muted); max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#side { grid-area:side; border-left:1px solid var(--line); overflow:auto; padding:10px 12px; display:grid; gap:16px; align-content:start; background:var(--card) }
+.pals { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px }
+.pals button { width:30px; padding:3px 0; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:inherit; cursor:pointer; font-family:var(--mono) }
+.pals button.sel { background:var(--accent); color:#fff; border-color:var(--accent) }
+.palname { margin:6px 0 0; color:var(--muted) }
+.swatches { display:grid; grid-template-columns:58px repeat(4,1fr); gap:4px; margin-top:8px; align-items:center }
+.swatches .rl { color:var(--muted); font-size:11px }
+.swatches .ch { color:var(--muted); font-size:10px; text-align:center; font-family:var(--mono) }
+.sw { height:30px; border-radius:4px; outline:1px solid var(--line); display:grid; place-items:end start; padding:1px 3px; font-family:var(--mono); font-size:10px }
+.sw.t { background:repeating-conic-gradient(#888 0 25%, #bbb 0 50%) 0 0/10px 10px }
+.badges { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px }
+.badge { font-size:11px; padding:1px 7px; border-radius:10px; border:1px solid var(--line); background:var(--bg) }
+.badge.warn { border-color:var(--warn); color:var(--warn) }
+.where { margin:6px 0 0; padding:0; list-style:none; display:grid; gap:2px; font-size:12px }
+.where .k { font-family:var(--mono); font-size:11px; color:var(--muted) }
+.where button { border:0; background:none; color:var(--accent); padding:0; cursor:pointer; text-align:left }
+.muted { color:var(--muted) }
+.warnbox { margin-top:8px; padding:6px 8px; border:1px solid var(--warn); border-radius:4px; color:var(--warn); font-size:12px }
+#bar button { padding:3px 10px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:inherit; cursor:pointer }
+#bar button:disabled { opacity:.45; cursor:default }
+#bar .tools { display:flex; gap:2px }
+#bar .tools button.sel { background:var(--accent); border-color:var(--accent); color:#fff }
+#bar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600 }
+.savestate { color:var(--muted); font-size:12px; max-width:48ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.savestate.dirty { color:var(--warn) }
+.savestate.err { color:#d33; white-space:normal }
+#stage canvas[data-tool=pencil] { cursor:cell }
+#stage canvas[data-tool=picker] { cursor:copy }
+.chip { display:inline-block; width:10px; height:10px; vertical-align:-1px; outline:1px solid var(--line) }
+.chip.t, .sw.t { background:repeating-conic-gradient(#888 0 25%, #bbb 0 50%) 0 0/10px 10px }
+button.sw { border:0; cursor:pointer; width:100% }
+.sw.sel { outline:3px solid var(--accent); outline-offset:1px }
+.field { display:grid; grid-template-columns:52px 1fr; gap:6px; align-items:center; margin-top:6px; font-size:12px }
+.field span { color:var(--muted) }
+.field input, .field select, .conflicts select { min-width:0; padding:3px 5px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg) }
+#palPanel > label { display:flex; gap:6px; align-items:center; margin-top:8px; color:var(--muted); font-size:12px }
+.colour { display:flex; gap:8px; align-items:center; margin-top:8px; font-size:12px }
+.colour input[type=color] { width:44px; height:26px; padding:0; border:1px solid var(--line); border-radius:4px; background:none }
+.k { font-family:var(--mono); font-size:11px }
+button.link { border:0; background:none; color:var(--accent); padding:0; cursor:pointer; font-size:12px; margin-top:6px }
+.badge.edit { border-color:var(--accent); color:var(--accent) }
+#conflictPanel summary { cursor:pointer }
+#conflictPanel summary h3 { display:inline }
+.conflicts { list-style:none; margin:6px 0 0; padding:0; display:grid; gap:8px }
+.conflicts li { display:grid; grid-template-columns:24px 1fr; gap:8px; align-items:start; font-size:12px }
+.conflicts canvas { image-rendering:pixelated; border-radius:2px }
+.conflicts select { display:block; margin-top:3px; max-width:100% }
+</style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading the sprite model…</div></div>
+<script src="/editor.js"></script>
+</body>
+</html>

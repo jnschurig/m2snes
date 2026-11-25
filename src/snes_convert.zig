@@ -35,6 +35,7 @@ const map = @import("map.zig");
 const door = @import("door.zig");
 const target = @import("snes_target.zig");
 const chr = @import("snes_chr.zig");
+const sprite_edits = @import("sprite_edits.zig");
 const screens = @import("screens.zig");
 const physics = @import("physics.zig");
 const sprites = @import("sprites.zig");
@@ -96,7 +97,7 @@ pub const Error = error{
     /// as the bytes it went in as.
     MetaspriteDoesNotReencode,
 } || target.DestError || door.Error || map.Error || tileset.Error || physics.Error ||
-    physics.HitboxError || sprites.Error || entity.Error;
+    physics.HitboxError || sprites.Error || entity.Error || sprite_edits.Error;
 
 // ---- Assets ---------------------------------------------------------------
 
@@ -136,6 +137,11 @@ pub const Asset = struct {
     rom_at: usize,
     gb_bytes: usize,
     bytes: []u8,
+    /// A `chr_bg` asset that is the BG copy of sprite bytes (a `spr` window,
+    /// `ITEM`'s, the credits' objects): it takes the sprite edits too, as
+    /// shades (`sprite_edits.apply2bpp`). A background tileset does not, as
+    /// one of its tiles may match an edited sprite tile's key by chance.
+    twin: bool = false,
 };
 
 /// Which door-script variants were seen targeting each offsets entry.
@@ -381,7 +387,7 @@ pub fn convertTilemap(allocator: std.mem.Allocator, gb: []const u8, name: []cons
     // takes slot 0 and the engine ORs the slot in (`CopyAttrs`).
     const title_at = (offsets.find(title_chr_first) orelse return error.UnresolvedSource).romOffset();
     for (gb, 0..) |id, i| {
-        const title_slot = full_slots.slotAt(title_at + @as(usize, target.charForTitleId(id)) * 16);
+        const title_slot = full_slots.bgSlotAt(title_at + @as(usize, target.charForTitleId(id)) * 16);
         const w: u16 = @bitCast(if (title) target.titleWord(id, title_slot) else if (window) target.windowWord(id, 0) else target.playWord(id, 0));
         out[i * 2] = @truncate(w);
         out[i * 2 + 1] = @truncate(w >> 8);
@@ -1023,6 +1029,9 @@ pub const Set = struct {
     /// class's blob id 1. The engine reads it through `FullTablePtr`, which
     /// the injector points at it.
     full_colours: Blob = .{ .name = "full_colours", .bytes = &.{} },
+    /// `PutObject`'s attribute pages, `full_slots.objAttrPages`, colorization
+    /// Step 9: the `slots` class's blob id 2, at `PutAttrOp`'s operand.
+    obj_attrs: Blob = .{ .name = "obj_attrs", .bytes = &.{} },
     /// The gfxInfo records `loadGraphics` walks, 1.0 Step 8a, which
     /// `snes_inject` writes into the engine's `GfxInfo` table once each
     /// sheet's asset id is known.
@@ -1059,16 +1068,65 @@ fn fullColoursBlob(a: std.mem.Allocator) ![]u8 {
 
 /// The `slots` blob for `assets` (colorization Step 6): each character
 /// sheet's tiles' palette slots, keyed by asset id. See `full_slots`.
-fn slotsBlob(a: std.mem.Allocator, assets: []const Asset) ![]u8 {
+fn slotsBlob(a: std.mem.Allocator, assets: []const Asset, rom: []const u8, edits: sprite_edits.Index) ![]u8 {
     const sheets = try a.alloc(full_slots.Sheet, assets.len);
-    for (assets, sheets) |s, *out| out.* = .{
-        .id = s.id,
-        .chr = s.kind != .tilemap,
-        .obj = s.kind == .chr_obj,
-        .rom_at = s.rom_at,
-        .gb_bytes = s.gb_bytes,
-    };
+    for (assets, sheets) |s, *out| {
+        out.* = .{
+            .id = s.id,
+            .chr = s.kind != .tilemap,
+            .obj = s.kind == .chr_obj,
+            .rom_at = s.rom_at,
+            .gb_bytes = s.gb_bytes,
+        };
+        if (s.kind != .chr_obj or edits.map.count() == 0) continue;
+        const pals = try a.alloc(?u3, s.gb_bytes / 16);
+        for (pals, 0..) |*p, t| p.* = if (edits.get(rom[s.rom_at + t * 16 ..][0..16])) |e| e.palette else null;
+        out.palettes = pals;
+    }
     return full_slots.blob(a, sheets);
+}
+
+/// The sprite editor's edits (sprite-pixel-editor F2), applied to every copy
+/// of each edited tile: every `chr_obj` asset, and the `chr_bg` twins as
+/// shades. An edit that reaches no tile is an error, `bad` its key.
+pub fn applyEdits(a: std.mem.Allocator, assets: []const Asset, rom: []const u8, index: *const sprite_edits.Index, edits: *const sprite_edits.Edits, bad: *?u64) !void {
+    if (index.map.count() == 0) return;
+    var used: std.AutoHashMapUnmanaged(u64, void) = .empty;
+    defer used.deinit(a);
+    for (assets) |s| {
+        switch (s.kind) {
+            .tilemap => continue,
+            .chr_bg => if (!s.twin) continue,
+            .chr_obj => {},
+        }
+        for (0..s.gb_bytes / 16) |t| {
+            const e = index.get(rom[s.rom_at + t * 16 ..][0..16]) orelse continue;
+            try used.put(a, e.key, {});
+            switch (s.kind) {
+                .chr_obj => sprite_edits.apply(s.bytes[t * chr.snes_4bpp_bytes ..][0..32], e),
+                .chr_bg => sprite_edits.apply2bpp(s.bytes[t * chr.snes_2bpp_bytes ..][0..16], e),
+                .tilemap => unreachable,
+            }
+        }
+    }
+    for (edits.tiles) |t| if (!used.contains(t.key)) {
+        bad.* = t.key;
+        return Error.UnmatchedKey;
+    };
+}
+
+fn logEditError(err: anyerror, key: ?u64) void {
+    const what = switch (err) {
+        Error.WrongRom => "were made against a different ROM (rom_sha1)",
+        Error.UnusedIndex => "paint index 4, 8 or 12, which no pixel may use",
+        Error.DuplicateKey => "list the same tile twice",
+        Error.UnmatchedKey => "name a tile no sprite sheet holds",
+        else => return,
+    };
+    if (key) |k|
+        std.log.err("src/data/sprite_edits.zon: the edits for tile 0x{X:0>16} {s}", .{ k, what })
+    else
+        std.log.err("src/data/sprite_edits.zon: the edits {s}", .{what});
 }
 
 /// Convert everything, with the crawl `zig build crawl` cached for this ROM.
@@ -1155,6 +1213,7 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
                 .rom_at = e.romOffset(),
                 .gb_bytes = gb.len,
                 .bytes = bytes,
+                .twin = kind == .chr_bg and (basis == .shared_window or u.credits_obj),
             });
             set.by_basis[@intFromEnum(basis)] += 1;
             try kinds.put(a, id, kind);
@@ -1196,6 +1255,7 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
                     .chr_obj => try chr.to4bpp(a, gb),
                     else => try chr.to2bpp(a, gb),
                 },
+                .twin = kind == .chr_bg and op.load.which == .spr,
             });
             set.by_basis[@intFromEnum(Basis.door_op)] += 1;
             try kinds.put(a, id, kind);
@@ -1253,6 +1313,7 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
                         .chr_obj => try chr.to4bpp(a, gb),
                         else => try chr.to2bpp(a, gb),
                     },
+                    .twin = kind == .chr_bg,
                 });
                 set.by_basis[@intFromEnum(Basis.door_op)] += 1;
                 try kinds.put(a, id, kind);
@@ -1264,6 +1325,15 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
         }
     }
     set.assets = try assets.toOwnedSlice(a);
+    var bad_key: ?u64 = null;
+    var edits = sprite_edits.Index.init(a, &sprite_edits.data, rom, &bad_key) catch |err| {
+        logEditError(err, bad_key);
+        return err;
+    };
+    applyEdits(a, set.assets, rom, &edits, &sprite_edits.data, &bad_key) catch |err| {
+        logEditError(err, bad_key);
+        return err;
+    };
 
     // ---- Tileset tables ----------------------------------------------------
     var metatiles: std.ArrayList(Blob) = .empty;
@@ -1612,8 +1682,9 @@ pub fn runWalked(gpa: std.mem.Allocator, rom: []const u8, walked: []const warp.W
     set.aram = try aramBlobs(a, rom);
     set.title_art = try titleArtBlobs(a);
     set.debug = try debugBlobs(a, rom, walked);
-    set.slots = .{ .name = "slots", .bytes = try slotsBlob(a, set.assets) };
+    set.slots = .{ .name = "slots", .bytes = try slotsBlob(a, set.assets, rom, edits) };
     set.full_colours = .{ .name = "full_colours", .bytes = try fullColoursBlob(a) };
+    set.obj_attrs = .{ .name = "obj_attrs", .bytes = try a.dupe(u8, &full_slots.objAttrPages()) };
     set.gfx_info = try gfx_info.decode(rom);
 
     return set;
@@ -2025,6 +2096,9 @@ test "every converted character asset decodes back to the tiles it came from" {
 
     var set = try run(gpa, rom);
     defer set.deinit();
+    var bad: ?u64 = null;
+    var edits = try sprite_edits.Index.init(gpa, &sprite_edits.data, rom, &bad);
+    defer edits.map.deinit(gpa);
 
     var over_read: usize = 0;
     for (set.assets) |asset| {
@@ -2035,12 +2109,27 @@ test "every converted character asset decodes back to the tiles it came from" {
         if (offsets.find(asset.name)) |e| {
             if (asset.gb_bytes > e.size) over_read += 1;
         }
+        // A tile the sprite editor changed is its edit over the copy; every
+        // other is the copy (`sprite_edits`).
         switch (asset.kind) {
-            .chr_bg => try testing.expectEqualSlices(u8, gb, asset.bytes),
-            .chr_obj => {
-                const back = try chr.from4bpp(gpa, asset.bytes);
-                defer gpa.free(back);
-                try testing.expectEqualSlices(u8, gb, back);
+            .chr_bg => for (0..gb.len / 16) |t| {
+                var want = gb[t * 16 ..][0..16].*;
+                if (asset.twin) if (edits.get(&want)) |e| sprite_edits.apply2bpp(&want, e);
+                try testing.expectEqualSlices(u8, &want, asset.bytes[t * 16 ..][0..16]);
+            },
+            .chr_obj => for (0..gb.len / 16) |t| {
+                const tile = gb[t * 16 ..][0..16];
+                const got = asset.bytes[t * 32 ..][0..32];
+                if (edits.get(tile)) |e| {
+                    var want: [32]u8 = @splat(0);
+                    want[0..16].* = tile.*;
+                    sprite_edits.apply(&want, e);
+                    try testing.expectEqualSlices(u8, &want, got);
+                } else {
+                    const back = try chr.from4bpp(gpa, got);
+                    defer gpa.free(back);
+                    try testing.expectEqualSlices(u8, tile, back);
+                }
             },
             .tilemap => {
                 // Through the same map the conversion used. The title's is a
@@ -2066,6 +2155,129 @@ test "every converted character asset decodes back to the tiles it came from" {
     // The three $530-byte lavaCaves sheets. Stated so the over-read stays a
     // known quantity rather than something that could quietly spread.
     try testing.expectEqual(@as(usize, 3), over_read);
+}
+
+/// The set's assets with their bytes copied, for `applyEdits` to change.
+fn copyAssets(a: std.mem.Allocator, set: Set) ![]Asset {
+    const out = try a.dupe(Asset, set.assets);
+    for (out) |*s| s.bytes = try a.dupe(u8, s.bytes);
+    return out;
+}
+
+fn romHex(rom: []const u8) [40]u8 {
+    var digest: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+    std.crypto.hash.Sha1.hash(rom, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
+test "a sprite edit reaches every copy of its tile, and only those" {
+    const gpa = testing.allocator;
+    const rom = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(rom);
+    var set = try run(gpa, rom);
+    defer set.deinit();
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Samus's first tile with a pixel drawn.
+    const sheet = for (set.assets) |s| {
+        if (s.kind == .chr_obj and std.mem.indexOf(u8, s.name, "samus") != null) break s;
+    } else return error.NoSamusSheet;
+    const tile = for (0..sheet.gb_bytes / 16) |t| {
+        const gb = rom[sheet.rom_at + t * 16 ..][0..16];
+        if (std.mem.indexOfNone(u8, gb, &.{0}) != null) break gb;
+    } else return error.BlankSheet;
+    const hex = romHex(rom);
+    const edit = sprite_edits.Tile{ .key = sprite_edits.tileKey(tile), .palette = 3, .pixels = &.{
+        .{ .x = 0, .y = 0, .index = 13 },
+        .{ .x = 5, .y = 6, .index = 0 },
+    } };
+    const edits = sprite_edits.Edits{ .rom_sha1 = &hex, .tiles = &.{edit} };
+    var bad: ?u64 = null;
+    var index = try sprite_edits.Index.init(a, &edits, rom, &bad);
+    const assets = try copyAssets(a, set);
+    try applyEdits(a, assets, rom, &index, &edits, &bad);
+
+    var copies: usize = 0;
+    for (set.assets, assets) |before, after| {
+        if (before.kind == .tilemap) {
+            try testing.expectEqualSlices(u8, before.bytes, after.bytes);
+            continue;
+        }
+        const size: usize = if (before.kind == .chr_obj) 32 else 16;
+        for (0..before.gb_bytes / 16) |t| {
+            const old = before.bytes[t * size ..][0..size];
+            const new = after.bytes[t * size ..][0..size];
+            const hit = std.mem.eql(u8, rom[before.rom_at + t * 16 ..][0..16], tile) and
+                (before.kind == .chr_obj or before.twin);
+            if (!hit) {
+                try testing.expectEqualSlices(u8, old, new);
+                continue;
+            }
+            if (before.kind == .chr_obj) {
+                copies += 1;
+                try testing.expectEqual(@as(u4, 13), sprite_edits.pixel4(new[0..32], 0, 0));
+                try testing.expectEqual(@as(u4, 0), sprite_edits.pixel4(new[0..32], 5, 6));
+            } else {
+                try testing.expectEqual(@as(u8, 0x80), new[0] & 0x80);
+                try testing.expectEqual(@as(u8, 0), new[1] & 0x80);
+            }
+        }
+    }
+    try testing.expect(copies >= 1);
+
+    // The palette choice reaches the slots blob for each copy.
+    const blob = try slotsBlob(a, assets, rom, index);
+    for (assets) |s| {
+        if (s.kind != .chr_obj) continue;
+        const slots = full_slots.of(blob, s.id).?;
+        for (0..s.gb_bytes / 16) |t| {
+            if (std.mem.eql(u8, rom[s.rom_at + t * 16 ..][0..16], tile)) try testing.expectEqual(@as(u8, 3), slots[t]);
+        }
+    }
+}
+
+test "the BG copies of sprite bytes take the edits, and no background tileset does" {
+    const gpa = testing.allocator;
+    const rom = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(rom);
+    var set = try run(gpa, rom);
+    defer set.deinit();
+    var credits: usize = 0;
+    for (set.assets) |s| {
+        if (!s.twin) {
+            // `CreditsChrRows`' BG rows are the credits' sprite sheets.
+            try testing.expect(!(s.kind == .chr_bg and (std.mem.eql(u8, s.name, "gfx_creditsSprTiles") or std.mem.eql(u8, s.name, "gfx_creditsNumbers"))));
+            continue;
+        }
+        try testing.expectEqual(AssetKind.chr_bg, s.kind);
+        if (offsets.find(s.name)) |e| try testing.expect(e.kind != .graphics_tileset);
+        if (std.mem.startsWith(u8, s.name, "gfx_credits")) credits += 1;
+        // Each is the twin of a sprite sheet: the same bytes at 4bpp.
+        for (set.assets) |o| {
+            if (o.kind == .chr_obj and o.rom_at == s.rom_at and o.gb_bytes == s.gb_bytes) break;
+        } else return error.NoSpriteTwin;
+    }
+    try testing.expectEqual(@as(usize, 2), credits);
+}
+
+test "a sprite edit whose key matches no tile fails, naming it" {
+    const gpa = testing.allocator;
+    const rom = try testrom.load(gpa) orelse return error.SkipZigTest;
+    defer gpa.free(rom);
+    var set = try run(gpa, rom);
+    defer set.deinit();
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const hex = romHex(rom);
+    const edits = sprite_edits.Edits{ .rom_sha1 = &hex, .tiles = &.{.{ .key = 0x0123_4567_89AB_CDEF, .pixels = &.{.{ .x = 1, .y = 1, .index = 1 }} }} };
+    var bad: ?u64 = null;
+    var index = try sprite_edits.Index.init(a, &edits, rom, &bad);
+    try testing.expectError(Error.UnmatchedKey, applyEdits(a, try copyAssets(a, set), rom, &index, &edits, &bad));
+    try testing.expectEqual(@as(?u64, 0x0123_4567_89AB_CDEF), bad);
 }
 
 test "the physics blobs are the arcs, with the terminator turned into a length" {

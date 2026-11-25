@@ -1,0 +1,12 @@
+// The sprite editor's pixel edits and palette choices (`src/sprite_edits.zig`),
+// written whole by `zig build sprite-editor`: comments added here are lost on
+// its next save. One entry per unique Game Boy tile, keyed by
+// `sprite_edits.tileKey` of its original 16 bytes; no tile bytes are stored.
+// `palette` is the tile's OBJ palette slot where it differs from the derived
+// one, and each pixel's `index` its 4bpp colour (shade `index & 3`, never 4,
+// 8 or 12). `rom_sha1` is the ROM the keys were taken from, checked whenever
+// `tiles` is non-empty.
+.{
+    .rom_sha1 = "",
+    .tiles = .{},
+}

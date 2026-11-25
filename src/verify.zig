@@ -3409,10 +3409,12 @@ const warp_faults = [_]ScenarioFault{
     // the body keeps the room's scroll, the head's window never closes and
     // the status bar never comes: her room is not the Game Boy's picture.
     .{ .label = "QueenApply", .patch = &.{0x60}, .scenario = "queen", .want = 36 },
-    // 1.0 Step 10: the engine before 1.0 Step 8b's fix, OBP1 loaded straight
-    // after OBP0 at colour $84, so object palette 1 is black: each refill's
-    // blink is black on the black play field.
-    .{ .label = "LoadPaletteOne_obp1", .offset = 1, .patch = &.{0x84}, .scenario = "refills", .want = 39 },
+    // 1.0 Step 10: OBP1 loaded somewhere other than object palette 1, so
+    // palette 1 is black: each refill's blink is black on the black play
+    // field. 1.0 Step 8b's bug put it at colour $84, straight after OBP0; since
+    // sprite editor Step 2 a palette is sixteen colours, and from $84 the
+    // last four would land on $90 after all, so the fault puts it at $A0.
+    .{ .label = "LoadPaletteOne_obp1", .offset = 1, .patch = &.{0xA0}, .scenario = "refills", .want = 39 },
     // 1.0 Step 10: the count's test gone (`bne` to `bra`), as before the
     // step: the refill at zero fills and the credits branch never runs.
     .{ .label = "ItemPickupArm_missileRefillTest", .patch = &.{0x80}, .scenario = "refill_credits", .want = 43 },

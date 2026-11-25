@@ -1,0 +1,7 @@
+// The sprite editor's frame names and groups, and the sheet chosen for a frame
+// the model can't resolve (`sprite_catalog.Frame`), written whole by
+// `zig build sprite-editor`: comments added here are lost on its next save.
+// `set` is the sprite table (`samus` or `enemy`) and `id` the metasprite.
+.{
+    .frames = .{},
+}

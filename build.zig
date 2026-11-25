@@ -196,7 +196,8 @@ pub fn build(b: *std.Build) void {
         "src/snes_layout.zig", "src/snes_screen.zig", "src/snes_render.zig",
         "src/snes_inject.zig", "src/inspect.zig", "src/title_super.zig",
         "src/gfx_info.zig", "src/colors.zig", "src/gbc_oracle.zig",
-        "src/title_badge.zig",
+        "src/title_badge.zig", "src/swatch_full.zig", "src/sprite_edits.zig",
+        "src/sprite_catalog.zig", "src/sprite_model.zig", "src/sprite_editor.zig",
     };
     var snes_mods: [snes_files.len]*std.Build.Module = undefined;
     for (snes_files, 0..) |f, i| {
@@ -823,7 +824,7 @@ pub fn build(b: *std.Build) void {
         run.setCwd(b.path("."));
         b.step("test-title", "Run the title oracle's tests").dependOn(&run.step);
     }
-    const test_filter = b.option([]const u8, "test-filter", "Run only the tests whose names contain this (test-pause, test-warp)");
+    const test_filter = b.option([]const u8, "test-filter", "Run only the tests whose names contain this (test-pause, test-warp, and the SNES modules under test)");
     {
         const t = b.addTest(.{ .root_module = pause_oracle_mod, .filters = if (test_filter) |f| &.{f} else &.{} });
         const run = b.addRunArtifact(t);
@@ -867,12 +868,14 @@ pub fn build(b: *std.Build) void {
         run.setCwd(b.path("."));
         test_step.dependOn(&run.step);
     }
+    const test_snes_step = b.step("test-snes", "Run the SNES-side modules' tests only (with -Dtest-filter)");
     for (snes_mods) |mod| {
-        const t = b.addTest(.{ .root_module = mod });
+        const t = b.addTest(.{ .root_module = mod, .filters = if (test_filter) |f| &.{f} else &.{} });
         const run = b.addRunArtifact(t);
         run.step.dependOn(&crawl_run.step);
         run.setCwd(b.path("."));
         test_step.dependOn(&run.step);
+        test_snes_step.dependOn(&run.step);
     }
     for (gb_mods) |mod| {
         const t = b.addTest(.{ .root_module = mod });
@@ -1109,6 +1112,46 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| credits_run.addArgs(args);
     b.step("credits", "The `credits` rung on its own: [clock or fault label ...], each run in Mesen2 from build-out/credits-*")
         .dependOn(&credits_run.step);
+
+    // ---- `full`'s colour sets in Mesen2 (colorization Step 9) ---------------
+    const swatch_full_mod_exe = b.createModule(.{
+        .root_source_file = b.path("src/swatch_full_main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    swatch_full_mod_exe.addOptions("build_options", options);
+    swatch_full_mod_exe.addImport("testrom", testrom_mod);
+    swatch_full_mod_exe.addImport("png", png_mod);
+    addShimpkg(b, swatch_full_mod_exe);
+    addEngine(b, swatch_full_mod_exe);
+    const swatch_full_run = b.addRunArtifact(b.addExecutable(.{ .name = "swatch-full", .root_module = swatch_full_mod_exe }));
+    swatch_full_run.setCwd(b.path("."));
+    swatch_full_run.has_side_effects = true;
+    if (b.args) |args| swatch_full_run.addArgs(args);
+    b.step("swatch-full", "The full scheme's swatch sheets: each colour set's Mesen2 frame and colours, and every sprite sheet in its palettes, to build-out/swatch-full/ (`-- survey`: what each set draws)")
+        .dependOn(&swatch_full_run.step);
+
+    // ---- The sprite editor (sprite-pixel-editor F6) ---------------------------
+    const sprite_editor_mod_exe = b.createModule(.{
+        .root_source_file = b.path("src/sprite_editor_main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    sprite_editor_mod_exe.addOptions("build_options", options);
+    sprite_editor_mod_exe.addImport("testrom", testrom_mod);
+    sprite_editor_mod_exe.addImport("png", png_mod);
+    addShimpkg(b, sprite_editor_mod_exe);
+    addEngine(b, sprite_editor_mod_exe);
+    const sprite_editor_exe = b.addExecutable(.{ .name = "sprite-editor", .root_module = sprite_editor_mod_exe });
+    const sprite_editor_run = b.addRunArtifact(sprite_editor_exe);
+    sprite_editor_run.setCwd(b.path("."));
+    sprite_editor_run.has_side_effects = true;
+    b.step("sprite-editor", "The sprite editor: serves the editor page on a loopback port and prints its URL; saves write src/data/{full_colors,sprite_edits,sprite_frames}.zon (needs M2_ROM)")
+        .dependOn(&sprite_editor_run.step);
+    // For `mise run sprite-editor:start`, which runs it in the background. Not
+    // part of the plain `zig build`, which installs only m2snes.
+    b.step("sprite-editor-bin", "Install the sprite editor to zig-out/tools/sprite-editor, to run from the repository root (needs M2_ROM)")
+        .dependOn(&b.addInstallArtifact(sprite_editor_exe, .{ .dest_dir = .{ .override = .{ .custom = "tools" } } }).step);
 
     // ---- The table-driven dispatch survey (F4) -----------------------------
     const dispatch_mod_exe = b.createModule(.{

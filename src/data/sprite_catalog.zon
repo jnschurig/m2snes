@@ -1,0 +1,112 @@
+// The sprite catalogue (sprite editor Step 4; from `swatch_full.zig`): what
+// the enemy sprites are called, and the sheets the door walk can't find for
+// them. `sprite_catalog.zig` imports this file at compile time. It holds no
+// ROM bytes: only ids, AI addresses, names and sheet names.
+.{
+    // Species that share an AI, told apart by sprite id, named by eye against
+    // the Metroid II enemy art. A name ending in "?" is a guess.
+    .enemy_names = .{
+        .{ .id = 0x00, .name = "Tsumuri?" },
+        .{ .id = 0x01, .name = "Tsumuri?" },
+        .{ .id = 0x12, .name = "Yumbo?" },
+        .{ .id = 0x14, .name = "Hornoad" },
+        .{ .id = 0x16, .name = "Senjoo?" },
+        .{ .id = 0x20, .name = "Needler" },
+        .{ .id = 0x21, .name = "Needler" },
+        .{ .id = 0x30, .name = "Moheek?" },
+        .{ .id = 0x31, .name = "Moheek?" },
+        .{ .id = 0x46, .name = "Ramulken?" },
+        .{ .id = 0x63, .name = "Shirk?" },
+        .{ .id = 0x6B, .name = "Autoad?" },
+        .{ .id = 0x76, .name = "Arachnus" },
+        .{ .id = 0xA6, .name = "baby Metroid (egg)" },
+    },
+    // An enemy's name by the AI that spawns it (M2RoS's routine names), where
+    // no `enemy_names` id says otherwise.
+    .ai_names = .{
+        .{ .ai = 0x4EA1, .name = "Blob Thrower" },
+        .{ .ai = 0x5109, .name = "Arachnus" },
+        .{ .ai = 0x54A1, .name = "Glow Fly" },
+        .{ .ai = 0x5542, .name = "rock icicle" },
+        .{ .ai = 0x57DE, .name = "crawler A" },
+        .{ .ai = 0x58DE, .name = "crawler B" },
+        .{ .ai = 0x59C7, .name = "Skreek" },
+        .{ .ai = 0x5AE2, .name = "Drivel" },
+        .{ .ai = 0x5CE0, .name = "Gullugg" },
+        .{ .ai = 0x5E0B, .name = "Chute Leech" },
+        .{ .ai = 0x5F67, .name = "pipe bug" },
+        .{ .ai = 0x60AB, .name = "Skorp" },
+        .{ .ai = 0x60F8, .name = "Skorp" },
+        .{ .ai = 0x6145, .name = "Autrack" },
+        .{ .ai = 0x61DB, .name = "hopper" },
+        .{ .ai = 0x62B4, .name = "Wallfire" },
+        .{ .ai = 0x638C, .name = "Gunzoo" },
+        .{ .ai = 0x6540, .name = "Autom" },
+        .{ .ai = 0x65D5, .name = "Proboscum" },
+        .{ .ai = 0x6622, .name = "missile block" },
+        .{ .ai = 0x66F3, .name = "Moto" },
+        .{ .ai = 0x6746, .name = "Halzyn" },
+        .{ .ai = 0x6841, .name = "Septogg" },
+        .{ .ai = 0x68A0, .name = "Flitt" },
+        .{ .ai = 0x68FC, .name = "Flitt" },
+        .{ .ai = 0x695F, .name = "Gravitt" },
+        .{ .ai = 0x6A14, .name = "missile door" },
+        .{ .ai = 0x6B83, .name = "Metroid stinger" },
+        .{ .ai = 0x6BB2, .name = "Alpha (hatching)" },
+        .{ .ai = 0x6C44, .name = "Alpha Metroid" },
+        .{ .ai = 0x6F60, .name = "Gamma Metroid" },
+        .{ .ai = 0x7276, .name = "Zeta Metroid" },
+        .{ .ai = 0x7631, .name = "Omega Metroid" },
+        .{ .ai = 0x7A4F, .name = "larval Metroid" },
+        .{ .ai = 0x7BE5, .name = "baby Metroid" },
+    },
+    // The sheet an AI's enemy is drawn with where the door walk can't say:
+    // the Metroids' and Arachnus's sheets are loaded by doors that test the
+    // Metroid count, which `warp.settleSprites` leaves out.
+    .ai_sheets = .{
+        .{ .ai = 0x5109, .sheet = "gfx_arachnus" },
+        .{ .ai = 0x6BB2, .sheet = "gfx_metAlpha" },
+        .{ .ai = 0x6C44, .sheet = "gfx_metAlpha" },
+        .{ .ai = 0x7A4F, .sheet = "gfx_metAlpha" },
+        .{ .ai = 0x6F60, .sheet = "gfx_metGamma" },
+        .{ .ai = 0x7276, .sheet = "gfx_metZeta" },
+        .{ .ai = 0x7631, .sheet = "gfx_metOmega" },
+    },
+    // Sprites the door walk gives the wrong sheet, by id range, with the
+    // sheet they assemble on (chosen by eye with `zig build swatch-full --
+    // try`). A range starts a run of its own.
+    .id_sheets = .{
+        .{ .lo = 0x40, .hi = 0x40, .sheet = "gfx_enemiesB" },
+        .{ .lo = 0x46, .hi = 0x49, .sheet = "gfx_enemiesD" },
+        .{ .lo = 0x5C, .hi = 0x62, .sheet = "gfx_enemiesC" },
+        .{ .lo = 0x63, .hi = 0x64, .sheet = "gfx_enemiesE" },
+        // Arachnus's frames, after the missile block's in the table.
+        .{ .lo = 0x76, .hi = 0x7F, .sheet = "gfx_arachnus" },
+    },
+    // AI pairs that move one species two ways (M2RoS's crawler A and B,
+    // Skorp vertical and horizontal, Flitt vanishing and moving).
+    .species_pairs = .{
+        .{ 0x57DE, 0x58DE },
+        .{ 0x60AB, 0x60F8 },
+        .{ 0x68A0, 0x68FC },
+    },
+    // The items, by `ITEM`'s operand less one (M2RoS's item numbers less
+    // one): item `n`'s orb is sprite `$80 + 2n`, its picture `$81 + 2n`.
+    .item_names = .{
+        "Plasma Beam",
+        "Ice Beam",
+        "Wave Beam",
+        "Spazer",
+        "Bombs",
+        "Screw Attack",
+        "Varia Suit",
+        "Hi-Jump Boots",
+        "Space Jump",
+        "Spider Ball",
+        "Spring Ball",
+        "Energy Tank",
+        "Missile Tank",
+        "energy refill",
+        "missile refill",
+    },
+}

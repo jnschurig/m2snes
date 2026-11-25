@@ -444,7 +444,7 @@ fn collect(gpa: std.mem.Allocator, set: convert.Set) !std.ArrayList(Source) {
     try appendBlobs(gpa, &list, .aram, set.aram);
     try appendBlobs(gpa, &list, .title_art, set.title_art);
     try appendBlobs(gpa, &list, .debug, set.debug);
-    try appendBlobs(gpa, &list, .slots, &.{ set.slots, set.full_colours });
+    try appendBlobs(gpa, &list, .slots, &.{ set.slots, set.full_colours, set.obj_attrs });
     return list;
 }
 
@@ -541,9 +541,9 @@ pub fn build(gpa: std.mem.Allocator, set: convert.Set, boot: screen.Boot, diag: 
     try patchTable(&rom, diag);
     try patchBoot(&rom, set, boot, diag);
     try patchSchemes(&rom, diag);
-    try patchObjAttrs(&rom, diag);
     try patchFull(&rom, diag);
     try patchDebugHexFont(&rom, diag);
+    try patchObjAttrs(&rom, diag);
     patchHeader(&rom);
     return rom;
 }
@@ -673,17 +673,21 @@ fn patchPtr(rom: *Rom, diag: *Diagnosis, at: usize, class: layout.Class, id: u8,
     writeAddr(rom.bytes[at..][0..3], addr);
 }
 
-/// `full`'s page of `PutObject`'s attribute table, `PutAttrFull`, from
-/// `full_slots.objAttr`: the OBP1 swap, the frozen rule and the Metroid damage palette are
-/// `full_assign.zig`'s, and nowhere in the engine (colorization Step 7).
+/// `PutObject`'s attribute pages, `full_slots.objAttrPages` (the `slots`
+/// class's blob 2), at `PutAttrOp`'s operand: the OBP1 swap, the frozen rule,
+/// the Metroid damage palette and Samus's palettes are `full_assign.zig`'s
+/// and `full_slots`', and nowhere in the engine (colorization Steps 7 and 9;
+/// out of the engine for room since Step 9).
 fn patchObjAttrs(rom: *Rom, diag: *Diagnosis) Error!void {
-    const at = symbolOffset("PutAttrFull") orelse {
-        diag.fail(null, "the engine image has no PutAttrFull symbol", .{});
+    const at = symbolOffset("PutAttrOp") orelse {
+        diag.fail(null, "the engine image has no PutAttrOp symbol", .{});
         return Error.PatchTableMissing;
     };
-    for ([_]full_slots.ObjPage{ .full, .metroid_hit, .frozen }, 0..) |page, p| {
-        for (0..256) |i| rom.bytes[at + p * 256 + i] = full_slots.objAttr(page, @intCast(i));
+    if (rom.bytes[at] != 0xBF) { // `lda.l long,x`
+        diag.fail(null, "PutAttrOp is not an lda.l long,x", .{});
+        return Error.PatchTableMismatch;
     }
+    try patchPtr(rom, diag, at + 1, .slots, 2, full_slots.page_count * 256);
 }
 
 /// The CGRAM words one scheme loads, mirrored from the engine's `!SCHEME_WORDS`.
@@ -1260,7 +1264,11 @@ test "the real set builds a ROM, and everything is where the table says" {
     // spawn has shot nothing -- so the table is untouched here and the seeded
     // case is its own test below.
     try testing.expect(world < bootrec);
-    try testing.expectEqualSlices(u8, image[0..world], rom.bytes[0..world]);
+    // Colorization Step 9: `PutAttrOp`'s operand, the attribute pages' address.
+    const op = symbolOffset("PutAttrOp").? + 1;
+    try testing.expect(op + 3 <= world);
+    try testing.expectEqualSlices(u8, image[0..op], rom.bytes[0..op]);
+    try testing.expectEqualSlices(u8, image[op + 3 .. world], rom.bytes[op + 3 .. world]);
     const world_end = world + boot_world_max * boot_world_entry_bytes;
     try testing.expectEqualSlices(u8, image[world..world_end], rom.bytes[world..world_end]);
     try testing.expectEqualSlices(u8, image[world_end..bootrec], rom.bytes[world_end..bootrec]);
@@ -1530,17 +1538,11 @@ test "the scheme table is colors.zig's, every scheme in id order" {
     }
 }
 
-test "PutObject's attribute pages: gbc's assembled, full's patched from full_slots" {
-    // Colorization Step 7. The first page is the engine's own arithmetic,
-    // which `full_slots.gbcObjAttr` mirrors; the second is $FF until patched.
-    const put = symbolOffset("PutAttr").?;
-    try testing.expectEqual(put + 256, symbolOffset("PutAttrFull").?);
-    for (0..256) |i| {
-        try testing.expectEqual(full_slots.gbcObjAttr(@intCast(i)), image[put + i]);
-        try testing.expectEqual(@as(u8, 0xFF), image[put + 256 + i]);
-        try testing.expectEqual(@as(u8, 0xFF), image[put + 512 + i]);
-        try testing.expectEqual(@as(u8, 0xFF), image[put + 768 + i]);
-    }
+test "PutObject's attribute pages: the builder's blob, at PutAttrOp's operand" {
+    // Colorization Step 9: `lda.l $FFFFFF,x` until patched, then the `slots`
+    // class's blob 2, `full_slots.objAttrPages` (page 0 gbc's arithmetic).
+    const op = symbolOffset("PutAttrOp").?;
+    try testing.expectEqualSlices(u8, &.{ 0xBF, 0xFF, 0xFF, 0xFF }, image[op..][0..4]);
 
     const gpa = testing.allocator;
     const bytes = try testrom.load(gpa) orelse return error.SkipZigTest;
@@ -1551,11 +1553,8 @@ test "PutObject's attribute pages: gbc's assembled, full's patched from full_slo
     var diag: Diagnosis = .{};
     var rom = try build(gpa, set, boot, &diag);
     defer rom.deinit();
-    for (0..256) |i| {
-        try testing.expectEqual(full_slots.objAttr(.full, @intCast(i)), rom.bytes[put + 256 + i]);
-        try testing.expectEqual(full_slots.objAttr(.metroid_hit, @intCast(i)), rom.bytes[put + 512 + i]);
-        try testing.expectEqual(full_slots.objAttr(.frozen, @intCast(i)), rom.bytes[put + 768 + i]);
-    }
+    try testing.expectEqual(blobAddress(rom, .slots, 2).?, readAddr(rom.bytes[op + 1 ..][0..3]));
+    try testing.expectEqualSlices(u8, &full_slots.objAttrPages(), blobBytes(rom, .slots, 2).?);
 }
 
 test "the boot record names the screen the builder chose" {
@@ -1947,11 +1946,17 @@ test "the engine's full-scheme constants are the Zig side's" {
     try testing.expectEqual(@as(u32, convert.area_offset), symbol("ConstAreaAt").?);
     try testing.expectEqual(@as(u32, areas.Area.count), symbol("ConstAreaCount").?);
     try testing.expectEqual(@as(u32, @intFromEnum(areas.Area.queen)), symbol("ConstAreaQueen").?);
+    try testing.expectEqual(@as(u32, areas.none), symbol("ConstAreaNone").?);
     try testing.expectEqual(@as(u32, areas.nest_bit), symbol("ConstNestBit").?);
     try testing.expectEqual(@as(u32, full_slots.metroid_damage_palette), symbol("ConstObjDamagePal").?);
     try testing.expectEqual(@as(u32, colors.full_table_words), symbol("ConstFullWords").?);
     try testing.expectEqual(@as(u32, areas.set_count), symbol("ConstFullSets").?);
     try testing.expectEqual(@as(u32, @intFromEnum(colors.Scheme.full)), symbol("ConstSchemeFull").?);
+    try testing.expectEqual(@as(u32, areas.setOf(.bubbles)), symbol("ConstSetBubbles").?);
+    try testing.expectEqual(@as(u32, areas.bubbles_table), symbol("ConstTableBubbles").?);
+    try testing.expectEqual(@as(u32, @intFromEnum(full_slots.ObjPage.samus)), symbol("ConstObjPageSamus").?);
+    try testing.expectEqual(@as(u32, full_slots.samus_suit_palette), symbol("ConstSamusSuitPal").?);
+    try testing.expectEqual(@as(u32, full_slots.samus_visor_palette), symbol("ConstSamusVisorPal").?);
 }
 
 test "the engine's debug-table constants are debug_tables'" {

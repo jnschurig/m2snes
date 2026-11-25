@@ -27,6 +27,44 @@ SNI_BIN = "{{ exec(command='for p in \"$SNI_BIN\" \"$(command -v sni || true)\" 
 description = "The gate: unit tests, tracked-file policy, and the ROM-dependent checks (needs the ROM)"
 run = "zig build verify"
 
+[tasks.sprite-editor]
+description = "The sprite editor: a local page for recolouring the full scheme's sprites (needs the ROM)"
+run = "zig build sprite-editor"
+
+[tasks."sprite-editor:start"]
+description = "Start the sprite editor in the background and print its URL; log and pid in build-out/ (needs the ROM)"
+run = '''
+set -eu
+pid=build-out/sprite-editor.pid log=build-out/sprite-editor.log
+if [ -f "$pid" ] && kill -0 "$(cat "$pid")" 2>/dev/null; then
+  echo "sprite-editor: already running (pid $(cat "$pid"))"; grep -o 'http://[^ ]*' "$log"; exit 0
+fi
+zig build sprite-editor-bin
+mkdir -p build-out
+nohup zig-out/tools/sprite-editor > "$log" 2>&1 &
+echo $! > "$pid"
+# The model takes a few seconds to build; the URL is the ready line.
+for _ in $(seq 120); do
+  if grep -q 'http://' "$log"; then grep 'sprite-editor:' "$log"; exit 0; fi
+  if ! kill -0 "$(cat "$pid")" 2>/dev/null; then cat "$log"; rm -f "$pid"; exit 1; fi
+  sleep 0.5
+done
+echo "sprite-editor: no URL after 60 s; see $log"; exit 1
+'''
+
+[tasks."sprite-editor:stop"]
+description = "Stop the background sprite editor"
+run = '''
+set -eu
+pid=build-out/sprite-editor.pid
+if [ -f "$pid" ] && kill -0 "$(cat "$pid")" 2>/dev/null; then
+  kill "$(cat "$pid")"; echo "sprite-editor: stopped (pid $(cat "$pid"))"
+else
+  echo "sprite-editor: not running"
+fi
+rm -f "$pid"
+'''
+
 [tasks.hooks]
 description = "Install the git hooks (once per clone; needs prek or pre-commit): the policy before each commit (.pre-commit-config.yaml), the audit and the gate before each push (.githooks/pre-push)"
 # pre-commit refuses to install while core.hooksPath is set (older clones set it).

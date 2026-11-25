@@ -1,0 +1,444 @@
+// `full`'s colours (colorization Step 9; data since sprite editor Step 1),
+// chosen by eye from Samus Returns screenshots and James's direction: each
+// Metroid II area after its paired Samus Returns area (`docs/colorization.md`,
+// "The colours"). `colors.zig` imports this file at compile time.
+//
+// Every colour is 0xRRGGBB as the SNES shows it: a BGR555 colour with each
+// 5-bit channel `c` written `(c << 3) | (c >> 2)` (`colors.rgb888`), so the
+// file says exactly what the cart draws. A table is four shades, lightest
+// first, indexed like the Game Boy's: shade 3 is black.
+//
+// An object palette (`obj`, `damage`, `suits`) is four such tables: its
+// variants (sprite editor Step 2). A sprite pixel's colour index `i` (1-15,
+// never 4, 8 or 12) is shade `i & 3` through OBP0 `$93` of variant `i >> 2`,
+// so variant 0 is what the Game Boy's art shows and the others are colours an
+// edited tile may use instead. An unedited variant repeats variant 0. Shade 3
+// of every variant is never drawn (it is colour 0, 4, 8 or 12) and stays
+// black.
+//
+// This file is maintained by hand and by the sprite editor, which patches
+// values in place and leaves the comments alone.
+.{
+    // Each colour set's BG3 palettes (`areas.setOf`): the areas in id order,
+    // then their `nest` variants, then `acid` and `bubbles`. A slot is the
+    // same kind of thing in every set: 0 the main rock, 2 the second rock, 4
+    // machinery (the ship, the ruins' insides), 6 a second structure (the
+    // bubbles), 7 the plants. Slots 1, 3 and 5 hold the tiles drawn the same
+    // everywhere (`full_assign.tile_choices`): spikes and coral red, the
+    // liquid that slows Samus yellow, acid purple. Every BG slot's shade 3 is
+    // black: BGP `$93` puts it at colour 0, the backdrop.
+    .bg = .{
+        // 0: surface (Samus Returns' surface): amber rock, chartreuse, the gunship
+        .{
+            .{ 0xDEBD94, 0xC68431, 0x422910, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xC6D694, 0x8CAD31, 0x313910, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xF7CE94, 0xEF9C29, 0x523108, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xB5C694, 0x6B8C29, 0x213108, 0x000000 }, // 6: second structure
+            .{ 0xE7B5A5, 0xD66B4A, 0x4A2118, 0x000000 }, // 7: plants
+        },
+        // 1: area 1 (its area 1): amber-brown caves, Chozo gold, green highlights
+        .{
+            .{ 0xCEB594, 0xA56B29, 0x392108, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xBDA594, 0x7B5231, 0x291810, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xE7CEA5, 0xCEA54A, 0x423918, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xC6AD94, 0x8C5A29, 0x312108, 0x000000 }, // 6: second structure
+            .{ 0xC6D694, 0x8CAD31, 0x293910, 0x000000 }, // 7: plants
+        },
+        // 2: area 2 (area 2): teal water, sandy stone
+        .{
+            .{ 0x94C6C6, 0x318C8C, 0x103131, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xCEC6AD, 0xA58C5A, 0x392918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xADCED6, 0x5AA5B5, 0x183939, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x94B5BD, 0x296B7B, 0x082129, 0x000000 }, // 6: second structure
+            .{ 0xA5DEBD, 0x52BD84, 0x184229, 0x000000 }, // 7: plants
+        },
+        // 3: area 3: Chozo ruins, greens and browns
+        .{
+            .{ 0xADBDA5, 0x5A7B4A, 0x212918, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xBDAD9C, 0x7B6342, 0x292110, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xCEC6A5, 0xA58C52, 0x393118, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CB5AD, 0x396B5A, 0x102118, 0x000000 }, // 6: second structure
+            .{ 0xC6CE9C, 0x8CA542, 0x313910, 0x000000 }, // 7: plants
+        },
+        // 4: area 4: greys and blues, a little purple
+        .{
+            .{ 0xB5BDC6, 0x6B7B8C, 0x212929, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xA5ADC6, 0x4A5A8C, 0x182129, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xC6C6CE, 0x8C94A5, 0x293139, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x94A5CE, 0x314AA5, 0x101839, 0x000000 }, // 6: second structure
+            .{ 0xC6A5DE, 0x9452C6, 0x311842, 0x000000 }, // 7: plants
+        },
+        // 5: area 5: greens and organics, red accents
+        .{
+            .{ 0xADC69C, 0x5A8C39, 0x213110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xC6CEA5, 0x8CA552, 0x293918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xB5BD9C, 0x6B7B39, 0x212910, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CBDA5, 0x427B4A, 0x102918, 0x000000 }, // 6: second structure
+            .{ 0xE794AD, 0xD63163, 0x4A1021, 0x000000 }, // 7: plants
+        },
+        // 6: area 6: browns and oranges
+        .{
+            .{ 0xD6B594, 0xB56329, 0x392108, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xBDA594, 0x7B4A29, 0x291808, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xE7C69C, 0xD68C42, 0x4A2910, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xC6AD94, 0x8C5A31, 0x311810, 0x000000 }, // 6: second structure
+            .{ 0xEFCE9C, 0xE7A542, 0x4A3910, 0x000000 }, // 7: plants
+        },
+        // 7: area 7: the lab, greys and blues, green accents
+        .{
+            .{ 0xADB5BD, 0x5A6B7B, 0x182129, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0x9CA5BD, 0x39527B, 0x101829, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xC6CED6, 0x8C94A5, 0x293139, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x949CAD, 0x29395A, 0x081018, 0x000000 }, // 6: second structure
+            .{ 0xBDDE9C, 0x7BC642, 0x294210, 0x000000 }, // 7: plants
+        },
+        // 8: area 8: dark teal caves, olive fronds
+        .{
+            .{ 0x9CADB5, 0x39636B, 0x102121, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADB5B5, 0x5A6B73, 0x182121, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xB5BDA5, 0x6B7B52, 0x212918, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x94A5A5, 0x295252, 0x101818, 0x000000 }, // 6: second structure
+            .{ 0xC6C69C, 0x8C9442, 0x313110, 0x000000 }, // 7: plants
+        },
+        // 9: area 9 (area 7): golden light
+        .{
+            .{ 0xE7CE8C, 0xCEA521, 0x423908, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xCEBD94, 0xA57B29, 0x392908, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xD6C6A5, 0xB5944A, 0x393118, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xC6B58C, 0x8C7321, 0x312108, 0x000000 }, // 6: second structure
+            .{ 0xEFDEA5, 0xDEBD4A, 0x4A4218, 0x000000 }, // 7: plants
+        },
+        // 10: area 10 (area 8, the nest): organic magenta
+        .{
+            .{ 0xCE9CBD, 0xA54284, 0x391029, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xBD94AD, 0x7B3163, 0x291021, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xC6A5BD, 0x8C527B, 0x311829, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xAD94A5, 0x632952, 0x210818, 0x000000 }, // 6: second structure
+            .{ 0xDEADCE, 0xC663A5, 0x422139, 0x000000 }, // 7: plants
+        },
+        // 11: the Queen's room: greens, as a nest. Her room draws the status bar
+        // on the background: its fill in slot 3, the window's blue, and its
+        // glyphs in slot 7, which her floor shares, so green.
+        .{
+            .{ 0xA5C69C, 0x4A8C42, 0x183110, 0x000000 }, // 0: main rock
+            .{ 0xB5D6A5, 0x73B552, 0x213918, 0x000000 }, // 1
+            .{ 0xB5D6A5, 0x73B552, 0x213918, 0x000000 }, // 2
+            .{ 0xA5C6EF, 0x4A94E7, 0x18314A, 0x000000 }, // 3: status bar fill (the window blue)
+            .{ 0x9CB5A5, 0x396B4A, 0x102118, 0x000000 }, // 4
+            .{ 0xADCEB5, 0x5AA573, 0x213921, 0x000000 }, // 5
+            .{ 0xADCEB5, 0x5AA573, 0x213921, 0x000000 }, // 6
+            .{ 0xA5CEC6, 0x4AA58C, 0x183929, 0x000000 }, // 7: the status bar's glyphs and her floor
+        },
+        // 12: surface, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xBDCE9C, 0x739C39, 0x293110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADD69C, 0x5AAD39, 0x213910, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xC6D69C, 0x84A531, 0x293910, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xA5CE9C, 0x4A9C31, 0x183110, 0x000000 }, // 6: second structure
+            .{ 0xBDC6A5, 0x7B8C42, 0x293110, 0x000000 }, // 7: plants
+        },
+        // 13: area1, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xB5C69C, 0x638C31, 0x213110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADC69C, 0x528439, 0x182910, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xBDD6A5, 0x7BAD42, 0x293910, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xADC69C, 0x5A8C31, 0x213110, 0x000000 }, // 6: second structure
+            .{ 0xADD69C, 0x5AAD39, 0x213910, 0x000000 }, // 7: plants
+        },
+        // 14: area2, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0x9CCEB5, 0x319C63, 0x103121, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xB5CEA5, 0x639C4A, 0x213118, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xA5D6BD, 0x42AD73, 0x183921, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x94CEAD, 0x31945A, 0x103118, 0x000000 }, // 6: second structure
+            .{ 0xA5DEAD, 0x42B55A, 0x103921, 0x000000 }, // 7: plants
+        },
+        // 15: area3, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xA5CEA5, 0x4A9442, 0x183110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADC69C, 0x528C42, 0x183110, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xB5CEA5, 0x639C42, 0x213118, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CC6A5, 0x39944A, 0x103118, 0x000000 }, // 6: second structure
+            .{ 0xADD69C, 0x5AAD42, 0x213910, 0x000000 }, // 7: plants
+        },
+        // 16: area4, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xA5CEAD, 0x4A9463, 0x183121, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0x9CC6AD, 0x398C63, 0x103121, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xADD6B5, 0x5AA56B, 0x213921, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CC6B5, 0x31846B, 0x102921, 0x000000 }, // 6: second structure
+            .{ 0xADC6BD, 0x5A847B, 0x212929, 0x000000 }, // 7: plants
+        },
+        // 17: area5, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xA5CE9C, 0x4A9C39, 0x183110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADD6A5, 0x5AAD42, 0x213918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xA5CE9C, 0x4A9439, 0x183110, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CCEA5, 0x399442, 0x103110, 0x000000 }, // 6: second structure
+            .{ 0xBDBDA5, 0x7B734A, 0x292918, 0x000000 }, // 7: plants
+        },
+        // 18: area6, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xB5C69C, 0x6B8C31, 0x213110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADC69C, 0x528431, 0x182910, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xBDCE9C, 0x7B9C42, 0x293110, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xADC69C, 0x5A8C39, 0x212910, 0x000000 }, // 6: second structure
+            .{ 0xC6D69C, 0x84AD42, 0x293910, 0x000000 }, // 7: plants
+        },
+        // 19: area7, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xA5C6AD, 0x428C5A, 0x183118, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0x9CC6AD, 0x39845A, 0x102918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xADD6B5, 0x5AA56B, 0x213921, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CBDA5, 0x317B4A, 0x102918, 0x000000 }, // 6: second structure
+            .{ 0xADDE9C, 0x52B542, 0x184210, 0x000000 }, // 7: plants
+        },
+        // 20: area8, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0x9CC6AD, 0x398C52, 0x103118, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xA5C6AD, 0x429452, 0x183118, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xA5CEA5, 0x4A9442, 0x183118, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x9CC6A5, 0x318442, 0x102918, 0x000000 }, // 6: second structure
+            .{ 0xADD69C, 0x5AA542, 0x213910, 0x000000 }, // 7: plants
+        },
+        // 21: area9, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xBDD69C, 0x7BAD31, 0x293910, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xB5CE9C, 0x639431, 0x213110, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xB5D6A5, 0x6BA542, 0x213910, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xADCE9C, 0x5A9431, 0x213110, 0x000000 }, // 6: second structure
+            .{ 0xBDDEA5, 0x84B542, 0x293910, 0x000000 }, // 7: plants
+        },
+        // 22: area10, nest: the area's colours leaning green, as Samus Returns'
+        // Metroid rooms. The Queen's room has none.
+        .{
+            .{ 0xB5BDAD, 0x637B5A, 0x212921, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADBDA5, 0x52734A, 0x182918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xADC6AD, 0x5A845A, 0x212918, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xA5BDA5, 0x4A7342, 0x182118, 0x000000 }, // 6: second structure
+            .{ 0xBDC6B5, 0x738C6B, 0x293121, 0x000000 }, // 7: plants
+        },
+        // 23: acid: mostly purple, as Samus Returns' acid areas
+        .{
+            .{ 0xA58CBD, 0x52217B, 0x180829, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xB59CCE, 0x6B39A5, 0x211039, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xBD9CDE, 0x8442C6, 0x291042, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0xCE94DE, 0xA531C6, 0x391042, 0x000000 }, // 6: second structure
+            .{ 0xDEADEF, 0xC663E7, 0x42214A, 0x000000 }, // 7: plants
+        },
+        // 24: bubbles: Super Metroid's Bubble Mountain, dark green bubbles with orange rims
+        .{
+            .{ 0x9CB59C, 0x397342, 0x102110, 0x000000 }, // 0: main rock
+            .{ 0xF78C8C, 0xF71818, 0x520808, 0x000000 }, // 1: spikes and coral (red)
+            .{ 0xADCEA5, 0x5AA552, 0x183918, 0x000000 }, // 2: second rock
+            .{ 0xEFDE94, 0xE7C631, 0x4A4210, 0x000000 }, // 3: slowing liquid (yellow)
+            .{ 0xE7B594, 0xD67329, 0x4A2108, 0x000000 }, // 4: machinery
+            .{ 0xC694E7, 0x9429D6, 0x31084A, 0x000000 }, // 5: acid (purple)
+            .{ 0x94AD9C, 0x295A31, 0x082110, 0x000000 }, // 6: second structure
+            .{ 0xE79C8C, 0xCE4221, 0x421008, 0x000000 }, // 7: plants
+        },
+    },
+    // The status bar and the item-name window, one per pair of slots
+    // (`snes_target.hud_palette` on): Samus Returns' message-box blue.
+    // Colour 3 is the backdrop (black), and the bar's glyphs are colour 3,
+    // so the bar is the light blue and its glyphs black.
+    .window = .{
+        .{ 0xA5C6EF, 0x4A94E7, 0x18314A, 0x000000 }, // palette 2
+        .{ 0xA5C6EF, 0x4A94E7, 0x18314A, 0x000000 }, // palette 3
+        .{ 0xA5C6EF, 0x4A94E7, 0x18314A, 0x000000 }, // palette 4
+        .{ 0xA5C6EF, 0x4A94E7, 0x18314A, 0x000000 }, // palette 5
+    },
+    // The objects' 8 palettes. `null` is a suit palette, which takes the
+    // Power suit's colours from `suits`.
+    .obj = .{
+        // 0: "shell", ivory to brown: the robots (Autoad, Autom, Moto, Halzyn)
+        // and the Metroids' shells (James: the enemy art)
+        .{
+            .{ 0xF7EFD6, 0xBD9C6B, 0x5A4229, 0x000000 },
+            .{ 0xF7EFD6, 0xBD9C6B, 0x5A4229, 0x000000 },
+            .{ 0xF7EFD6, 0xBD9C6B, 0x5A4229, 0x000000 },
+            .{ 0xF7EFD6, 0xBD9C6B, 0x5A4229, 0x000000 },
+        },
+        // 1: Samus's suit (`full_slots.samus_suit_palette`): `suits`' Power body
+        null,
+        // 2: the Queen
+        .{
+            .{ 0xBDC694, 0x7B9431, 0x293110, 0x000000 },
+            .{ 0xBDC694, 0x7B9431, 0x293110, 0x000000 },
+            .{ 0xBDC694, 0x7B9431, 0x293110, 0x000000 },
+            .{ 0xBDC694, 0x7B9431, 0x293110, 0x000000 },
+        },
+        // 3: frozen, and the OBP1 flash
+        .{
+            .{ 0xB5E7F7, 0x73CEF7, 0x214252, 0x000000 },
+            .{ 0xB5E7F7, 0x73CEF7, 0x214252, 0x000000 },
+            .{ 0xB5E7F7, 0x73CEF7, 0x214252, 0x000000 },
+            .{ 0xB5E7F7, 0x73CEF7, 0x214252, 0x000000 },
+        },
+        // 4: a Metroid's body
+        .{
+            .{ 0xADE79C, 0x5ACE39, 0x184210, 0x000000 },
+            .{ 0xADE79C, 0x5ACE39, 0x184210, 0x000000 },
+            .{ 0xADE79C, 0x5ACE39, 0x184210, 0x000000 },
+            .{ 0xADE79C, 0x5ACE39, 0x184210, 0x000000 },
+        },
+        // 5: "organic", pinks and reds: Moheek, Tsumuri, Ramulken, Gullug,
+        // Drivel, Arachnus's body
+        .{
+            .{ 0xFFB5AD, 0xDE4A4A, 0x732131, 0x000000 },
+            .{ 0xFFB5AD, 0xDE4A4A, 0x732131, 0x000000 },
+            .{ 0xFFB5AD, 0xDE4A4A, 0x732131, 0x000000 },
+            .{ 0xFFB5AD, 0xDE4A4A, 0x732131, 0x000000 },
+        },
+        // 6: beams and missiles, the wave beam
+        .{
+            .{ 0xF7DE9C, 0xF7C642, 0x524210, 0x000000 },
+            .{ 0xF7DE9C, 0xF7C642, 0x524210, 0x000000 },
+            .{ 0xF7DE9C, 0xF7C642, 0x524210, 0x000000 },
+            .{ 0xF7DE9C, 0xF7C642, 0x524210, 0x000000 },
+        },
+        // 7: Samus's visor (`full_slots.samus_visor_palette`): `suits`' Power visor
+        null,
+    },
+    // OBJ palette 2 at a hit Metroid's damage steps 1-3
+    // (`full_slots.metroidStep`), outside the Queen's room: slot 4's body
+    // towards red. Step 0 is slot 2's own colours.
+    .damage = .{
+        .{ // 3/4 health
+            .{ 0xDEDE94, 0xBDBD29, 0x424208, 0x000000 },
+            .{ 0xDEDE94, 0xBDBD29, 0x424208, 0x000000 },
+            .{ 0xDEDE94, 0xBDBD29, 0x424208, 0x000000 },
+            .{ 0xDEDE94, 0xBDBD29, 0x424208, 0x000000 },
+        },
+        .{ // 1/2 health
+            .{ 0xEFBD8C, 0xE77B21, 0x4A2908, 0x000000 },
+            .{ 0xEFBD8C, 0xE77B21, 0x4A2908, 0x000000 },
+            .{ 0xEFBD8C, 0xE77B21, 0x4A2908, 0x000000 },
+            .{ 0xEFBD8C, 0xE77B21, 0x4A2908, 0x000000 },
+        },
+        .{ // 1/4 health
+            .{ 0xF78C8C, 0xEF2121, 0x520808, 0x000000 },
+            .{ 0xF78C8C, 0xEF2121, 0x520808, 0x000000 },
+            .{ 0xF78C8C, 0xEF2121, 0x520808, 0x000000 },
+            .{ 0xF78C8C, 0xEF2121, 0x520808, 0x000000 },
+        },
+    },
+    // Samus's suit and visor palettes (`full_slots.samus_suit_palette`,
+    // `samus_visor_palette`), Power then Varia. Her body is one palette, and
+    // each shade runs over all of her (her helmet has no tiles of its own):
+    // the light shade is most of the suit, the middle its shading, the dark
+    // its outline. The red middle and dark, and the visor (green glass, the
+    // helmet's red edge), are the same for both suits (James); the light
+    // shade is the suit's own colour.
+    .suits = .{
+        // Power: yellow
+        .{
+            .{ // body
+                .{ 0xFFD642, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xFFD642, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xFFD642, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xFFD642, 0xDE3921, 0x841010, 0x000000 },
+            },
+            .{ // visor
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+            },
+        },
+        // Varia: orange
+        .{
+            .{ // body
+                .{ 0xF78C31, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xF78C31, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xF78C31, 0xDE3921, 0x841010, 0x000000 },
+                .{ 0xF78C31, 0xDE3921, 0x841010, 0x000000 },
+            },
+            .{ // visor
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+                .{ 0xADF78C, 0x42C642, 0x841010, 0x000000 },
+            },
+        },
+    },
+}

@@ -489,6 +489,61 @@ pub fn settle(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, de
     return out;
 }
 
+/// The sprite sheets each room can have loaded (colorization Step 9's enemy
+/// swatch): `settle`'s walk over the same crossings, with the sheet (`spr`)
+/// carried beside the tileset, indexed by room.
+pub fn settleSprites(allocator: std.mem.Allocator, rom: []const u8, w: roster.World, decoded: door.Decoded, xs: []const Crossing) ![]std.AutoArrayHashMapUnmanaged(Src, void) {
+    const Key = struct { t: Tileset, spr: Src };
+    const ptrs = door.pointers(rom) orelse return Error.NoDoorData;
+    const rows = thresholds(rom);
+    var rooms: usize = 0;
+    for (w.room) |b| for (b) |r| {
+        if (r != roster.World.none) rooms = @max(rooms, @as(usize, r) + 1);
+    };
+    const sets = try allocator.alloc(std.AutoArrayHashMapUnmanaged(Key, void), rooms);
+    defer {
+        for (sets) |*x| x.deinit(allocator);
+        allocator.free(sets);
+    }
+    for (sets) |*x| x.* = .empty;
+    const init = save.initial(rom) orelse return Error.NoInitialSave;
+    const s0 = try initialState(rom, decoded);
+    try sets[w.roomOf(.{ .bank = init.level_bank, .cell = init.cell() })].put(allocator, .{ .t = Tileset.of(s0), .spr = s0.spr }, {});
+
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (xs) |x| {
+            if (x.run.counted or x.run.queen) continue;
+            if (x.run.to.bank < map.first_bank or x.run.to.bank > map.last_bank) continue;
+            if (!w.cellOf(x.run.to).inUse()) continue;
+            const from = w.roomOf(x.from);
+            const to = w.roomOf(x.run.to);
+            if (from == to) continue;
+            var i: usize = 0;
+            while (i < sets[from].count()) : (i += 1) {
+                const k = sets[from].keys()[i];
+                var before = s0;
+                before.bg = k.t.bg;
+                before.tiletable = k.t.tiletable;
+                before.collision = k.t.collision;
+                before.solidity = k.t.solidity;
+                before.spr = k.spr;
+                const s, _ = after(decoded, ptrs, rows, before, x.run);
+                if (!opening(rom, w, x.from, x.run.to, x.dir, before, s)) continue;
+                const g = try sets[to].getOrPut(allocator, .{ .t = Tileset.of(s), .spr = s.spr });
+                if (!g.found_existing) changed = true;
+            }
+        }
+    }
+    const out = try allocator.alloc(std.AutoArrayHashMapUnmanaged(Src, void), rooms);
+    for (out, sets) |*o, set| {
+        o.* = .empty;
+        for (set.keys()) |k| try o.put(allocator, k.spr, {});
+    }
+    return out;
+}
+
 // ---- The warp entries -------------------------------------------------------
 
 /// Where an entry's tileset came from.

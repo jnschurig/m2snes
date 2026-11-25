@@ -21,7 +21,9 @@
 //!
 //! A tile's slot is `full_assign.zig`'s for the region tile that holds its
 //! first byte (`slot`: the derived slot, or the hand choice in
-//! `tile_choices`); a tile in no region gets slot 0. Slots are scheme-independent:
+//! `tile_choices`; a background sheet's through `bgSlot`, which keeps three
+//! slots for the tiles `full` draws the same everywhere); a tile in no region
+//! gets slot 0. Slots are scheme-independent:
 //! `mono` and `gbc` load the same colours into every BG palette, so the bits
 //! change nothing they show.
 
@@ -43,15 +45,34 @@ pub fn attr(s: u3) u8 {
     return @intCast(w >> 8);
 }
 
-/// The pages of `PutAttr` that `full` reads (`!ObjPage`), colorization Step 7.
-pub const ObjPage = enum(u2) {
+/// The pages of the attribute table that `full` reads (`!ObjPage`),
+/// colorization Step 7; Samus's since Step 9.
+pub const ObjPage = enum(u3) {
     /// Every object but the two below.
     full = 1,
     /// A Metroid's parts while `metroidStep` is non-zero.
     metroid_hit = 2,
     /// A frozen enemy's parts (`iceCounter` non-zero).
     frozen = 3,
+    /// Samus's parts (`DrawSamus`): her suit and visor in palettes of their
+    /// own, which `FullSuitLoad` fills with the suit she wears.
+    samus = 4,
 };
+
+/// The attribute table's pages, page 0 `mono`'s and `gbc`'s.
+pub const page_count = 5;
+
+/// Samus's palettes (colorization Step 9): her suit's body (slots 5, 1 and
+/// 0 of her sheets: 0 is the Varia Suit's shoulders) and her visor (slot 7).
+/// No other object draws in them.
+pub const samus_suit_palette: u3 = 1;
+pub const samus_visor_palette: u3 = 7;
+/// On Samus's page, each slot's palette.
+const samus_map = [8]u3{ samus_suit_palette, samus_suit_palette, 2, 3, 4, samus_suit_palette, 6, samus_visor_palette };
+/// On every other page, a palette Samus owns becomes this one: the wave beam
+/// and the few enemy parts in slot 1 (and the OBP1 swap's 1) draw in the
+/// beams' 6, those in slot 7 in 0.
+const others_fold = [8]u3{ 0, 6, 2, 3, 4, 5, 6, 0 };
 
 /// A Metroid's body: the slot most of every Metroid sheet's tiles are in.
 pub const metroid_body_slot: u3 = 4;
@@ -68,7 +89,7 @@ pub const metroid_damage_palette: u3 = 2;
 /// slot, when the swap doesn't move it, is the damage palette.
 pub fn objAttr(page: ObjPage, i: u8) u8 {
     const s: u3 = @intCast(i & 7);
-    const pal: u3 = if (page == .frozen)
+    const derived: u3 = if (page == .frozen)
         assign.frozen_slot
     else if (i & 0x10 != 0)
         (if (s == assign.obp1_swap.when) assign.obp1_swap.then else assign.obp1_swap.otherwise)
@@ -76,6 +97,7 @@ pub fn objAttr(page: ObjPage, i: u8) u8 {
         metroid_damage_palette
     else
         s;
+    const pal = if (page == .samus) (if (i & 0x10 != 0) derived else samus_map[s]) else others_fold[derived];
     return (gbcObjAttr(i) & ~@as(u8, 0x0E)) | (@as(u8, pal) << 1);
 }
 
@@ -97,7 +119,18 @@ pub fn metroidStep(health: u8, full_health: u8) u2 {
     return 0;
 }
 
-/// The engine's first page, `PutAttr`, which `mono` and `gbc` read: OBP1 as
+/// The attribute table `PutObject` reads (`PutAttrOp`'s operand, the `slots`
+/// class's blob 2): page 0 `gbcObjAttr`, then `objAttr`'s pages 1-4.
+pub fn objAttrPages() [page_count * 256]u8 {
+    var out: [page_count * 256]u8 = undefined;
+    for (0..256) |i| out[i] = gbcObjAttr(@intCast(i));
+    for (1..page_count) |p| for (0..256) |i| {
+        out[p * 256 + i] = objAttr(@enumFromInt(p), @intCast(i));
+    };
+    return out;
+}
+
+/// The engine's first page, which `mono` and `gbc` read: OBP1 as
 /// palette 1, the low nibble ignored.
 pub fn gbcObjAttr(i: u8) u8 {
     return ((i & 0x60) << 1) | ((i & 0x10) >> 3) | (((i & 0x80) >> 2) ^ 0x20);
@@ -126,6 +159,28 @@ pub fn slot(name: []const u8, tile: usize) ?u3 {
     return assign.slot(name, tile);
 }
 
+/// The slot a background sheet's tile is drawn in: a hand choice (a spike,
+/// acid or the slowing liquid, each kind's own slot), else the derived slot
+/// moved out of those three (`full_assign.bg_merge`).
+pub fn bgSlot(name: []const u8, tile: usize) ?u3 {
+    for (assign.tile_choices) |c| {
+        if (!std.mem.eql(u8, c.region, name)) continue;
+        for (c.tiles) |t| if (t == tile) return c.slot;
+    }
+    return assign.bg_merge[assign.slot(name, tile) orelse return null];
+}
+
+/// `slotAt` for a background sheet: `bgSlot`'s, or 0.
+pub fn bgSlotAt(at: usize) u3 {
+    for (assign.regions) |r| {
+        const e = entry(r.name) orelse continue;
+        const start = e.romOffset();
+        if (at < start or at >= e.romEnd()) continue;
+        return bgSlot(r.name, (at - start) / 16) orelse 0;
+    }
+    return 0;
+}
+
 fn entry(name: []const u8) ?offsets.Entry {
     for (offsets.entries) |e| if (std.mem.eql(u8, e.name, name)) return e;
     return null;
@@ -140,6 +195,9 @@ pub const Sheet = struct {
     obj: bool = false,
     rom_at: usize,
     gb_bytes: usize,
+    /// An object sheet's per-tile palette choices (`sprite_edits`), null
+    /// where the tile keeps its derived slot. Empty: none.
+    palettes: []const ?u3 = &.{},
 };
 
 /// The blob, for `sheets` (any order, ids unique).
@@ -156,13 +214,18 @@ pub fn blob(a: std.mem.Allocator, sheets: []const Sheet) ![]u8 {
         std.debug.assert(std.mem.readInt(u16, out[@as(usize, s.id) * 2 ..][0..2], .little) == none);
         std.mem.writeInt(u16, out[@as(usize, s.id) * 2 ..][0..2], @intCast(at), .little);
         for (0..tiles(s)) |t| {
-            const sl = slotAt(s.rom_at + t * 16);
-            out[at + t] = if (s.obj) sl else attr(sl);
+            out[at + t] = if (s.obj) objSlot(s, t) else attr(bgSlotAt(s.rom_at + t * 16));
         }
         at += tiles(s);
     }
     std.debug.assert(at == size);
     return out;
+}
+
+/// An object sheet's tile `t`: the editor's palette choice, else `slotAt`.
+fn objSlot(s: Sheet, t: usize) u3 {
+    if (t < s.palettes.len) if (s.palettes[t]) |p| return p;
+    return slotAt(s.rom_at + t * 16);
 }
 
 fn tiles(s: Sheet) usize {
@@ -234,7 +297,7 @@ test "the blob round-trips each sheet's attribute bytes" {
     try testing.expect(of(b, 200) == null);
     const seven = of(b, 7).?;
     try testing.expectEqual(r.slots.len, seven.len);
-    for (seven, 0..) |got, i| try testing.expectEqual(attr(slot(r.name, i).?), got);
+    for (seven, 0..) |got, i| try testing.expectEqual(attr(bgSlot(r.name, i).?), got);
     const zero = of(b, 0).?;
     try testing.expectEqual(@as(usize, 3), zero.len);
     try testing.expectEqualSlices(u8, seven[2..5], zero);
@@ -249,6 +312,18 @@ test "an object sheet's blob bytes are its plain slots" {
     const b = try blob(testing.allocator, &sheets);
     defer testing.allocator.free(b);
     for (of(b, 7).?, 0..) |got, i| try testing.expectEqual(@as(u8, slot(r.name, i).?), got);
+}
+
+test "an object tile's palette choice overrides its derived slot" {
+    const r = assign.regions[1];
+    const e = entry(r.name).?;
+    const pick: u3 = slot(r.name, 1).? +% 1;
+    const sheets = [_]Sheet{
+        .{ .id = 7, .chr = true, .obj = true, .rom_at = e.romOffset(), .gb_bytes = e.size, .palettes = &.{ null, pick } },
+    };
+    const b = try blob(testing.allocator, &sheets);
+    defer testing.allocator.free(b);
+    for (of(b, 7).?, 0..) |got, i| try testing.expectEqual(@as(u8, if (i == 1) pick else slot(r.name, i).?), got);
 }
 
 /// The slot of the tile the status bar's id `id` shows: Samus's power suit
@@ -273,15 +348,30 @@ test "the status bar's edits give each id its own tile's slot" {
 test "objAttr: the slot, the OBP1 swap, and the frozen page over both" {
     for (0..8) |s| {
         const slot3: u8 = @intCast(s);
-        // OBP0: the slot itself.
-        try testing.expectEqual(slot3 << 1, objAttr(.full, slot3) & 0x0E);
-        // OBP1: 3 becomes 1, anything else 3.
-        const swapped: u8 = if (s == 3) 1 else 3;
+        // OBP0: the slot itself, but Samus's palettes.
+        try testing.expectEqual(@as(u8, others_fold[s]) << 1, objAttr(.full, slot3) & 0x0E);
+        // OBP1: 3 becomes 1 (folded, as 1 is Samus's), anything else 3.
+        const swapped: u8 = if (s == 3) others_fold[1] else 3;
         try testing.expectEqual(swapped << 1, objAttr(.full, 0x10 | slot3) & 0x0E);
         // Frozen: 3, OBP1 or not, a Metroid or not.
         try testing.expectEqual(@as(u8, 3) << 1, objAttr(.frozen, slot3) & 0x0E);
         try testing.expectEqual(@as(u8, 3) << 1, objAttr(.frozen, 0x10 | slot3) & 0x0E);
     }
+}
+
+test "only Samus's page draws in her suit and visor palettes" {
+    for (1..page_count) |p| for (0..256) |n| {
+        const pal = (objAttr(@enumFromInt(p), @intCast(n)) >> 1) & 7;
+        if (p == @intFromEnum(ObjPage.samus)) continue;
+        try testing.expect(pal != samus_suit_palette and pal != samus_visor_palette);
+    };
+    // Her suit (slot 5) and visor (slot 7), and the flash over both.
+    try testing.expectEqual(@as(u8, samus_suit_palette) << 1, objAttr(.samus, 5) & 0x0E);
+    try testing.expectEqual(@as(u8, samus_visor_palette) << 1, objAttr(.samus, 7) & 0x0E);
+    try testing.expectEqual(@as(u8, 3) << 1, objAttr(.samus, 0x10 | 5) & 0x0E);
+    // The pages' flips and priority are gbc's.
+    const t = objAttrPages();
+    for (0..page_count) |p| for (0..256) |i| try testing.expectEqual(gbcObjAttr(@intCast(i)) & 0xF1, t[p * 256 + i] & 0xF1);
 }
 
 test "objAttr on a hit Metroid: the body in the damage palette, under the flash" {
@@ -379,56 +469,47 @@ test "attr is a play-field word's high byte, the slot its palette" {
 const tileset = @import("tileset.zig");
 const testrom = @import("testrom");
 
-/// Bit 3 of a collision byte: the tile hurts Samus (`00:$2021`).
+/// Collision bits (`engine/main.asm`'s `!BLOCK_*`): hurts Samus, acid, the
+/// liquid that slows her.
 const spike_bit: u8 = 0x08;
+const acid_bit: u8 = 0x10;
+const liquid_bit: u8 = 0x01;
 
-/// The slots the background can show beside tileset `ts`'s graphics `gfx`
-/// other than through its spikes: its other tiles (acid included), `$FF`,
-/// and the `gfx_surfaceSPR` tiles the surface's metatiles draw.
-fn othersOf(rom: []const u8, ts: tileset.Tileset, gfx: []const u8) !u8 {
-    const col = tileset.slice(rom, ts.collision) orelse return error.NoCollision;
-    const r = region(gfx) orelse return error.UnknownRegion;
-    var used: u8 = @as(u8, 1) << slot("gfx_commonItems", 0xF).?;
-    for (0..@min(0x80, r.slots.len)) |id| {
-        if (col[id] & spike_bit != 0) continue;
-        used |= @as(u8, 1) << slot(gfx, id).?;
-    }
-    for (ts.metatiles) |m| {
-        for (tileset.slice(rom, m) orelse return error.NoMetatiles) |id| {
-            if (id < 0x80 or id == 0xFF) continue;
-            // Only the surface draws past $80: `gfx_surfaceSPR` at $8B00.
-            try testing.expectEqualStrings("surface", ts.name);
-            used |= @as(u8, 1) << slot("gfx_surfaceSPR", id - 0xB0).?;
-        }
-    }
-    return used;
+/// The slot a tile's collision byte asks for, or null for terrain.
+fn kindSlot(c: u8) ?u3 {
+    if (c & spike_bit != 0) return assign.spike_slot;
+    if (c & acid_bit != 0) return assign.acid_slot;
+    if (c & liquid_bit != 0) return assign.liquid_slot;
+    return null;
 }
 
-test "every spike is in a slot no other background tile of its tileset uses" {
+test "every spike, acid and slowing-liquid tile is in its kind's slot, and no other background tile is" {
     const rom = (try testrom.load(testing.allocator)) orelse return error.SkipZigTest;
     defer testing.allocator.free(rom);
-    var unfree: usize = 0;
+    var kinds: usize = 0;
     for (tileset.tilesets) |ts| {
         const col = tileset.slice(rom, ts.collision) orelse return error.NoCollision;
         for (ts.gfx) |gfx| {
             const r = region(gfx) orelse return error.UnknownRegion;
-            var spikes: usize = 0;
             for (0..@min(0x80, r.slots.len)) |id| {
-                if (col[id] & spike_bit != 0) spikes += 1;
-            }
-            if (spikes == 0) continue;
-            const others = try othersOf(rom, ts, gfx);
-            for (0..@min(0x80, r.slots.len)) |id| {
-                if (col[id] & spike_bit == 0) continue;
-                const s = slot(gfx, id).?;
-                if (others & (@as(u8, 1) << s) != 0) {
-                    // Only where no slot is free, which `tile_choices` says.
-                    try testing.expectEqual(@as(u8, 0xFF), others);
-                    unfree += 1;
+                errdefer std.debug.print("{s} ${X:0>2}: collision {X:0>2}\n", .{ gfx, id, col[id] });
+                const s = bgSlot(gfx, id).?;
+                if (kindSlot(col[id])) |want| {
+                    try testing.expectEqual(want, s);
+                    kinds += 1;
+                } else {
+                    try testing.expect(s != assign.spike_slot and s != assign.acid_slot and s != assign.liquid_slot);
                 }
             }
         }
     }
-    // `ruinsExt`'s twelve, and nothing else.
-    try testing.expectEqual(@as(usize, 12), unfree);
+    // Spikes 18+4+8+4+4+4+12+4, acid 30+30+30+10, liquid 6+15+6+6+6+6.
+    try testing.expectEqual(@as(usize, 203), kinds);
+}
+
+test "the merge leaves the three kinds' slots and moves nothing else" {
+    for (assign.bg_merge, 0..) |to, from| {
+        try testing.expect(to != assign.spike_slot and to != assign.acid_slot and to != assign.liquid_slot);
+        if (from != assign.spike_slot and from != assign.acid_slot and from != assign.liquid_slot) try testing.expectEqual(@as(u3, @intCast(from)), to);
+    }
 }

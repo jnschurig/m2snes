@@ -567,31 +567,40 @@ pub const Look = union(enum) {
     nest: Area,
     /// The one shared purple set: a cave whose acid level changes.
     acid,
+    /// The bubble sheet's rooms, wherever they are (colorization Step 9,
+    /// James): Super Metroid's Bubble Mountain.
+    bubbles,
 };
 
-/// Queen > nest > acid > area. `byte` is the cell's entry in the cart's
-/// table; `lava_loaded` is whether the loaded metatile table is a lava table
-/// (`warp.isLavaTable`), which the engine knows exactly at run time and no
-/// static reading of the ROM does.
-pub fn lookOf(byte: u8, lava_loaded: bool) Look {
+/// The metatile table the bubble sheet's rooms load (`screens.tiletable_order`).
+pub const bubbles_table: u4 = 2;
+
+/// Queen > bubbles > nest > acid > area. `byte` is the cell's entry in the
+/// cart's table; `table` is the loaded metatile table, which says whether
+/// the room draws the bubbles or a lava table (`warp.isLavaTable`). The
+/// engine knows it exactly at run time and no static reading of the ROM does.
+pub fn lookOf(byte: u8, table: u4) Look {
     const area: Area = @enumFromInt(byte & ~nest_bit);
     if (area == .queen) return .{ .area = .queen };
+    if (table == bubbles_table) return .bubbles;
     if (byte & nest_bit != 0) return .{ .nest = area };
-    if (lava_loaded) return .acid;
+    if (table >= 6 and table <= 8) return .acid;
     return .{ .area = area };
 }
 
 /// How many colour sets `full` carries: one per area, a `nest` variant of
-/// each but the Queen's, and `acid`.
-pub const set_count: usize = Area.count + (Area.count - 1) + 1;
+/// each but the Queen's, `acid` and `bubbles`.
+pub const set_count: usize = Area.count + (Area.count - 1) + 2;
 
 /// A look's colour set, the index into `colors.full`'s per-set tables and the
-/// cart's: the areas in id order, then their `nest` variants, then `acid`.
+/// cart's: the areas in id order, then their `nest` variants, then `acid`
+/// and `bubbles`.
 pub fn setOf(look: Look) u8 {
     return switch (look) {
         .area => |a| @intFromEnum(a),
         .nest => |a| @as(u8, Area.count) + @intFromEnum(a),
-        .acid => @intCast(set_count - 1),
+        .acid => Area.count + Area.count - 1,
+        .bubbles => Area.count + Area.count,
     };
 }
 
@@ -678,27 +687,32 @@ test "the grid wraps, as the screen coordinates do" {
     try testing.expectEqual(@as(u8, 0x03), d.b.cell);
 }
 
-test "the colour set: queen over nest over acid over area" {
+test "the colour set: queen over bubbles over nest over acid over area" {
     const q: u8 = @intFromEnum(Area.queen);
     const a3: u8 = @intFromEnum(Area.area3);
-    try testing.expectEqual(Look{ .area = .queen }, lookOf(q, true));
-    try testing.expectEqual(Look{ .area = .queen }, lookOf(q | nest_bit, true));
-    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, true));
-    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, false));
-    try testing.expectEqual(Look.acid, lookOf(a3, true));
-    try testing.expectEqual(Look{ .area = .area3 }, lookOf(a3, false));
+    const lava: u4 = 7;
+    const plain: u4 = 4;
+    try testing.expectEqual(Look{ .area = .queen }, lookOf(q, lava));
+    try testing.expectEqual(Look{ .area = .queen }, lookOf(q | nest_bit, bubbles_table));
+    try testing.expectEqual(Look.bubbles, lookOf(a3 | nest_bit, bubbles_table));
+    try testing.expectEqual(Look.bubbles, lookOf(a3, bubbles_table));
+    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, lava));
+    try testing.expectEqual(Look{ .nest = .area3 }, lookOf(a3 | nest_bit, plain));
+    try testing.expectEqual(Look.acid, lookOf(a3, lava));
+    try testing.expectEqual(Look{ .area = .area3 }, lookOf(a3, plain));
 }
 
 test "every look the cart can reach has its own colour set" {
     var seen = [_]bool{false} ** set_count;
-    for (0..Area.count) |ai| for ([_]bool{ false, true }) |nest| for ([_]bool{ false, true }) |lava| {
+    const tables = [_]u4{ 4, 7, bubbles_table };
+    for (0..Area.count) |ai| for ([_]bool{ false, true }) |nest| for (tables) |lava| {
         const byte: u8 = @as(u8, @intCast(ai)) | (if (nest and ai != @intFromEnum(Area.queen)) nest_bit else 0);
         const look = lookOf(byte, lava);
         const set = setOf(look);
         try testing.expect(set < set_count);
         seen[set] = true;
         // Two looks never share a set.
-        for (0..Area.count) |bi| for ([_]bool{ false, true }) |nb| for ([_]bool{ false, true }) |lb| {
+        for (0..Area.count) |bi| for ([_]bool{ false, true }) |nb| for (tables) |lb| {
             const other = lookOf(@as(u8, @intCast(bi)) | (if (nb and bi != @intFromEnum(Area.queen)) nest_bit else 0), lb);
             if (setOf(other) == set) try testing.expectEqual(look, other);
         };

@@ -173,25 +173,41 @@ arch 65816
 assert !SCHEME_WORDS*2 == 1<<5     ; `LoadPalette` shifts the id by five
 ; Colorization Step 8: `full`, id 2, and `FullTable` (`colors.fullTable`):
 ; `!FULL_SETS` colour sets (`areas.setOf`) of BG3's 8 palettes of 4 words, then
-; the window's `!WIN_PALS`, the objects' 8 and the 3 Metroid damage steps.
+; the window's `!WIN_PALS`, the objects' 8, the 3 Metroid damage steps and
+; Samus's suit and visor for each suit (Step 9: Power, then Varia). From the
+; window on, a palette is sixteen words (sprite editor Step 2): an object
+; pixel's index `i` is shade `i & 3` of variant `i >> 2`, and the window's
+; four colours are there four times, as BG2 draws object characters too.
 ; Asar's arithmetic runs left to right, so every product is in parentheses.
 !SCHEME_FULL    = 2
-!FULL_SETS      = 24
+!AREA_COUNT     = 12
+!SET_ACID       = (!AREA_COUNT+!AREA_COUNT-1)
+!SET_BUBBLES    = (!SET_ACID+1)
+!FULL_SETS      = (!SET_BUBBLES+1)
 !FULL_SET_BYTES = 64            ; 8 palettes of 4 words
 !FULL_WIN_AT    = (!FULL_SETS*!FULL_SET_BYTES)
-!FULL_OBJ_AT    = (!FULL_WIN_AT+(!WIN_PALS*8))
-!FULL_DMG_AT    = (!FULL_OBJ_AT+(8*8))
-!FULL_WORDS     = ((!FULL_DMG_AT+(3*8))/2)
+!FULL_PAL_BYTES = 32            ; a window or object palette: 16 words
+!FULL_OBJ_AT    = (!FULL_WIN_AT+(!WIN_PALS*!FULL_PAL_BYTES))
+!FULL_DMG_AT    = (!FULL_OBJ_AT+(8*!FULL_PAL_BYTES))
+!FULL_SUIT_AT   = (!FULL_DMG_AT+(3*!FULL_PAL_BYTES))
+!FULL_SUIT_BYTES = (2*!FULL_PAL_BYTES) ; a suit's body and visor palettes
+!FULL_WORDS     = ((!FULL_SUIT_AT+(2*!FULL_SUIT_BYTES))/2)
 ; The per-cell area byte (`areas.Table`), after a map bank's cells in its
 ; `map_cells` blob (`snes_convert.area_offset`): the area, `!NEST_BIT` on a
 ; Metroid's room. The sets: the areas in id order, then their nest variants,
 ; then acid.
 !AREA_AT        = 256*4
-!AREA_COUNT     = 12
 !AREA_QUEEN     = 11
+!AREA_NONE      = $FF    ; `areas.none`: a cell no room is in
 !NEST_BIT       = $80
-!SET_ACID       = (!FULL_SETS-1)
 !SET_SURFACE    = 0
+!TABLE_BUBBLES  = 2             ; `screens.tiletable_order`: the bubble sheet's metatiles
+; Step 9: Samus's parts draw through their own page of the attribute table,
+; which puts her suit and visor in OBJ palettes no other object uses.
+!OBJ_PAGE_FULL  = 1
+!OBJ_PAGE_SAMUS = 4             ; `full_slots.ObjPage.samus`
+!SAMUS_SUIT_PAL = 1             ; `full_slots.samus_suit_palette`
+!SAMUS_VISOR_PAL = 7            ; `full_slots.samus_visor_palette`
 !OBJ_DAMAGE_PAL = 2             ; `full_slots.metroid_damage_palette`
 !BG12_CHAR_BASE = $1000
 ; BG34NBA: BG3 characters at word $0000.
@@ -3629,13 +3645,15 @@ ConstCollBlobs = !COLL_BLOBS
 !SlId         = $07B1           ; the sheet's asset id
 !HudBg3       = $07B2           ; $80 while the status bar is BG3's (her room), 0 the window's
 !SlBase       = $07B3           ; 2: the table `SlotFill` writes, `!BgAttr` or `!ObjSlot`
-!ObjPage      = $07B5           ; `PutObject`'s page of `PutAttr`: 0 mono/gbc, 1 full; an enemy's 2 hit Metroid, 3 frozen
+!ObjPage      = $07B5           ; `PutObject`'s attribute page: 0 mono/gbc, 1 full; an enemy's 2 hit Metroid, 3 frozen; Samus's 4
 !MetStepAcc   = $07B6           ; the worst Metroid damage step `DrawEnemies` has drawn so far this pass
 !MetStep      = $07B7           ; and at its end: what OBJ palette 2 shows in `full` (Step 8)
 !FullSet      = $07B8           ; colorization Step 8: the colour set BG3's CGRAM holds
 !FullObj2     = $07B9           ; and the damage step OBJ palette 2 holds
 !FullWant     = $07C5           ; the set `FullFrame` wants, for `SchemeNmi`
 !FullStep     = $07C7           ; the step `FullFrame` wants in OBJ palette 2
+!FullSuit     = $07C6           ; Step 9: the suit OBJ palettes 1 and 7 hold, 0 Power or 16 Varia
+!FullSuitWant = $07C8           ; and the one `FullFrame` wants
 !SlBlob       = $07BA           ; 5: `!Blob` and `!BlobLen`, kept across `SlotFill`
 !TmUsed       = $07BF           ; 2: bytes of `!TmStage` the queued copies hold
 !MetMax       = $07C1           ; 2: `EnemyObjPage`'s full health
@@ -4096,17 +4114,24 @@ ConstSchemeWords = !SCHEME_WORDS
 ConstSramScheme  = !SRAM_SCHEME&$FFFF
 ConstSchemeMagicLen = !SCHEME_MAGIC_LEN
 ConstFullWords   = !FULL_WORDS
+ConstSetBubbles  = !SET_BUBBLES
+ConstTableBubbles = !TABLE_BUBBLES
+ConstObjPageSamus = !OBJ_PAGE_SAMUS
+ConstSamusSuitPal = !SAMUS_SUIT_PAL
+ConstSamusVisorPal = !SAMUS_VISOR_PAL
 ConstDebugHexBytes = !DEBUG_HEX_BYTES
 ConstFullSets    = !FULL_SETS
 ConstSchemeFull  = !SCHEME_FULL
 ConstAreaAt      = !AREA_AT
 ConstAreaCount   = !AREA_COUNT
 ConstAreaQueen   = !AREA_QUEEN
+ConstAreaNone    = !AREA_NONE
 ConstNestBit     = !NEST_BIT
 ConstObjDamagePal = !OBJ_DAMAGE_PAL
 VarScheme        = !Scheme
 VarFullSet       = !FullSet
 VarFullObj2      = !FullObj2
+VarFullSuit      = !FullSuit
 VarScreenPri     = !ScreenPri
 
 VarItemStage     = !ItemStage
@@ -5251,9 +5276,11 @@ DeathAudioNoise:
 ; In NMI while `!DeathTimer` runs: 00:$2FE7-$3017. On a frame whose counter is a
 ; multiple of four, zero byte `deathAnimationTable[timer - 1]` of every two-tile
 ; stride of the object characters the Game Boy keeps at $8000-$87FF, and count
-; the timer down; at zero, dead. The object characters convert byte for byte
-; (`snes_chr.to4bpp` pads the upper planes), so a Game Boy byte at $8000 + n is
-; VRAM byte `!OBJ_CHAR_BASE`*2 + n here.
+; the timer down; at zero, dead. A Game Boy byte `n` there is byte `n & $0F` of
+; SNES tile `n >> 4`, 32 bytes a tile (`snes_chr.to4bpp`), so a stride is two
+; SNES tiles; and the same byte sixteen on, planes 2 and 3, is zeroed with it
+; (sprite editor Step 2), so an edited tile erases as the Game Boy's does.
+; `death.eraseBytes` is the model the unit test holds.
 DeathErase:
         sep #$20
         lda !FrameCount         ; $2FE7, before this vblank's increment
@@ -5269,24 +5296,42 @@ DeathErase:
         tax
         lda.w !DeathTable-1,x
         and.w #$00FF
+        bit.w #$0010            ; the stride's second tile: 32 bytes on, not 16
+        beq +
         clc
+        adc.w #$0010
++       clc
         adc.w #!OBJ_CHAR_BASE*2
         sta.w !DeathVram
         ldx.w #((!DEATH_END<<8)-$8000)/!DEATH_STRIDE
 -       lda.w !DeathVram
         lsr a                   ; the word, and the carry says which half
+        tay
+        sty !VMADDL
+        bcs .high
+        sep #$20
+        stz !VMDATAL            ; planes 0 and 1
+        rep #$21
+        tya
+        adc.w #8                ; planes 2 and 3, eight words on
         sta !VMADDL
         sep #$20
-        bcs .high
         stz !VMDATAL
         bra .next
 .high
+        sep #$20
+        stz !VMDATAL+1
+        rep #$21
+        tya
+        adc.w #8
+        sta !VMADDL
+        sep #$20
         stz !VMDATAL+1
 .next
         rep #$20
         lda.w !DeathVram
         clc
-        adc.w #!DEATH_STRIDE
+        adc.w #!DEATH_STRIDE*2  ; a stride is two 32-byte tiles
         sta.w !DeathVram
         dex
         bne -
@@ -12370,10 +12415,18 @@ DrawSamus:
         beq +
         lda.b #$01
         sta.w !SprAttr
++       lda.w !ObjPage          ; colorization Step 9: in `full`, her own page
+        beq +
+        lda.b #!OBJ_PAGE_SAMUS
+        sta.w !ObjPage
 +       rep #$30
         jsr DrawSprite
         sep #$20
-        stz.w !SprAttr          ; $4E10
+        lda.w !ObjPage
+        beq +
+        lda.b #!OBJ_PAGE_FULL
+        sta.w !ObjPage
++       stz.w !SprAttr          ; $4E10
         stz.w !ScreenPri        ; $4E18, after she is drawn
 .declined
         rep #$30
@@ -13021,12 +13074,13 @@ PutObject:
         ; from `DrawSprite`'s $4BA1 arm on Samus's parts, and from a record's
         ; own attribute on anything else.
         ;
-        ; Colorization Step 7: the palette. `PutAttr` is four pages, indexed
-        ; by the Game Boy byte's high nibble with the tile's slot (`!ObjSlot`)
-        ; in bits 0-2, the page `!ObjPage`: `mono` and `gbc` read page 0,
-        ; which ignores the slot, and `full` page 1 (`!Scheme`/2), or for an
-        ; enemy `EnemyObjPage`'s: 2 a hit Metroid, 3 frozen.
-        ; `full_slots.objAttr` fills pages 1-3. Some fourteen cycles more
+        ; Colorization Step 7: the palette. The attribute table is five pages
+        ; (Step 9: the builder's, at `PutAttrOp`'s operand), indexed by the
+        ; Game Boy byte's high nibble with the tile's slot (`!ObjSlot`) in
+        ; bits 0-2, the page `!ObjPage`: `mono` and `gbc` read page 0, which
+        ; ignores the slot, and `full` page 1 (`!Scheme`/2), or for an enemy
+        ; `EnemyObjPage`'s: 2 a hit Metroid, 3 frozen, and Samus 4.
+        ; `full_slots.objAttrPages` fills them. Some fourteen cycles more
         ; than one page: the Queen's room draws forty objects a frame.
         sep #$30
         ldx.w !ObjTile
@@ -13037,7 +13091,8 @@ PutObject:
         ora.l !ObjSlot,x        ; the slot, 0-7
         rep #$10
         tax                     ; 16-bit: the page under the index
-        lda.l PutAttr,x
+PutAttrOp:                      ; Step 9: the builder points the operand at the pages
+        lda.l $FFFFFF,x
         ldx !OamIdx
         sta.w !OamBuf+3,x
 
@@ -25808,7 +25863,8 @@ SchemeNmi:
 .badge                                  ; the `schemes` rung's fault patches this
         jmp BadgeShow           ; whose `rtl` is this one's
 .full                                   ; colorization Step 8, `FullFrame`'s:
-        rep #$30                ;   bit 1 the set's BG3 palettes, bit 2
+        rep #$30                ;   bit 1 the set's BG3 palettes and the
+        ;   window's, bit 2
         lsr a                   ;   OBJ palette 2
         bcc +
         pha
@@ -25816,7 +25872,12 @@ SchemeNmi:
         pla
 +       lsr a
         bcc +
+        pha
         jsr FullObj2Load
+        pla
++       lsr a
+        bcc +
+        jsr FullSuitLoad
 +       sep #$20
 .none
         rtl
@@ -28275,6 +28336,7 @@ DoorEnterQueen:
         rep #$30
         %call0(LoadScreen)
         jsr QueenInitialize             ; $28C7
+        jsl FullQueen                   ; colorization Step 9
         sep #$20
         lda !SamusX                     ; $28CA-$28D2: where she is on the screen
         sec
@@ -30418,11 +30480,11 @@ QueenDeleteBody:
 ; `queenDeath_lastTile`. One Game Boy byte is two copies here: BG3's 2bpp
 ; characters, which keep the id (`snes_target.charForTileId`), and below
 ; $9000 the objects' 4bpp ones, which BG2, her head, reads too; their planes 0
-; and 1 are the Game Boy's two bytes, and 2 and 3 are clear. The bytes are
-; ANDed in the shadows, and the spans they changed are left in `!QdList` for
-; `QueenNmiChr`. Reading VRAM back and writing it a byte at a time in NMI
-; overran her room's vblank by three lines. 8-bit A and index on entry and
-; exit.
+; and 1 are the Game Boy's two bytes, and 2 and 3, sixteen on, take the same
+; AND. The bytes are ANDed in the shadows, and the spans they changed are left
+; in `!QdList` for `QueenNmiChr`. Reading VRAM back and writing it a byte at
+; a time in NMI overran her room's vblank by three lines. 8-bit A and index
+; on entry and exit.
 QueenDisintegrate:
         lda.w !QueenDeathMask           ; $7B69
         bne +
@@ -30464,6 +30526,9 @@ QueenDisintegrate:
         lda.l !QueenChrObj,x
         and.w !QueenDeathMask
         sta.l !QueenChrObj,x
+        lda.l !QueenChrObj+16,x         ; and its planes 2 and 3 (sprite
+        and.w !QueenDeathMask           ;   editor Step 2), so an edited
+        sta.l !QueenChrObj+16,x         ;   pixel goes with the Game Boy's
         plx
 .step
         rep #$20                        ; $7B7F: HL + 8
@@ -30982,21 +31047,10 @@ QueenNmiRow:
         sep #$30
         rts
 
-; `PutObject`'s attribute byte for each Game Boy one: the flips a bit left,
-; OBP1 as palette 1, and priority 2 unless the behind-background bit is set.
-; The low nibble, the cart's own (`PutObject`), changes nothing here.
-PutAttr:
-!pa = 0
-while !pa < 256
-        db ((!pa&$60)<<1)|((!pa&$10)>>3)|(((!pa&$80)>>2)^$20)
-        !pa #= !pa+1
-endwhile
-; Colorization Step 7: `full`'s pages, by `snes_inject` from
-; `full_slots.objAttr`: 1 the slot in the low bits through the OBP1 swap, 2 the
-; same with a Metroid's body in the damage palette, 3 frozen. $FF here.
-PutAttrFull:
-        fillbyte $FF : fill 768
-assert PutAttrFull == PutAttr+256
+; `PutObject`'s attribute pages (`PutAttrOp`'s operand) are the `slots`
+; class's blob 2 since colorization Step 9, `full_slots.objAttrPages`: 0
+; `mono` and `gbc`, 1 `full`, 2 a hit Metroid, 3 frozen, 4 Samus. The engine's
+; banks have no room for five.
 
 ; ---------------------------------------------------------------------------
 ; Colorization Step 7: an enemy's page of `PutAttr`. `DrawEnemySprite`'s in
@@ -31819,10 +31873,12 @@ LoadPaletteOne:                         ; one palette a layer: `mono` and `gbc`
         sep #$20
         ; The window's, BG2 palettes `!HUD_PAL` on. Entry 0 is BG2's
         ; transparent colour, written for the same reason the objects' is.
+        ; Sixteen colours, the four four times (sprite editor Step 2): BG2
+        ; draws object characters, whose 4bpp pixels are shade `i & 3`.
         lda.b #!HUD_PAL<<4
 -       sta !CGADD
         pha
-        lda.b #1
+        lda.b #4
         jsr .four
         pla
         clc
@@ -31850,23 +31906,25 @@ LoadPaletteOne:                         ; one palette a layer: `mono` and `gbc`
         ; playtest OBP1 went to $84, straight after OBP0's four, and palette 1
         ; was black: a frozen enemy, a stunned one's flash and a blinking drop
         ; drew black on the black play field. `snes boot` code 15 reads $90.
+        ;
+        ; Each is its four colours four times over (sprite editor Step 2): a
+        ; 4bpp pixel's shade is `i & 3`, so every index an edited tile uses
+        ; shows the shade the Game Boy's art has there.
         lda.b #$80
         sta !CGADD
-        ldy.w #$0008
--       lda.l SchemeTable,x
-        sta !CGDATA
-        inx
-        dey
-        bne -
+        lda.b #4
+        jsr .four
+        rep #$20
+        txa
+        clc
+        adc.w #8                ; past OBP0's four
+        tax
+        sep #$20
 .obp1                                   ; the warp rung's `refills` fault patches this
         lda.b #$90
         sta !CGADD
-        ldy.w #$0008
--       lda.l SchemeTable,x
-        sta !CGDATA
-        inx
-        dey
-        bne -
+        lda.b #4
+        jsr .four
         plp
         rtl
 ; The four colours at `SchemeTable`+X into CGRAM, A times over, by DMA on
@@ -31912,35 +31970,14 @@ FullTablePtr:
 
 ; All of `full` into CGRAM, in the `surface` set: `LoadPalette`'s, so the
 ; title, a boot, game over and the credits (`FullSurface`) show it. Play's
-; sets follow from `FullFrame`. 16-bit A and index in; 8-bit A out.
+; sets follow from `FullFrame`. 16-bit A and index in and out.
 LoadFull:
         sep #$20
         lda.b #!SET_SURFACE
         sta.w !FullWant
         stz.w !FullStep
         rep #$30
-        jsr FullBg
-        ldx.w #$0000            ; the window's palettes, `!HUD_PAL` on
--       sep #$20
-        txa
-        clc
-        adc.b #!HUD_PAL
-        asl a
-        asl a
-        asl a
-        asl a
-        sta !CGADD
-        rep #$20
-        txa
-        asl a
-        asl a
-        asl a
-        clc
-        adc.w #!FULL_WIN_AT
-        jsr FullDma
-        inx
-        cpx.w #!WIN_PALS
-        bne -
+        jsr FullBg              ; and the window's palettes
         ldx.w #$0000            ; the objects' 8, sixteen colours apart from $80
 -       sep #$20
         txa
@@ -31955,6 +31992,8 @@ LoadFull:
         asl a
         asl a
         asl a
+        asl a
+        asl a                   ; `!FULL_PAL_BYTES` a palette
         clc
         adc.w #!FULL_OBJ_AT
         jsr FullDma
@@ -31963,10 +32002,38 @@ LoadFull:
         bne -
         sep #$20
         stz.w !FullObj2         ; OBJ palette 2 holds slot 2's own colours
-        rts
+        jsr FullSuitOf          ; Step 9: and 1 and 7 her suit's
+        rep #$30
+        ; fall through
+; Samus's suit and visor (OBJ palettes `!SAMUS_SUIT_PAL`, `!SAMUS_VISOR_PAL`)
+; in `!FullSuitWant`'s colours, and `!FullSuit` says so. 16-bit A and index in
+; and out.
+FullSuitLoad:
+        sep #$20
+        lda.b #$80+(!SAMUS_SUIT_PAL*16)
+        sta !CGADD
+        lda.w !FullSuitWant
+        sta.w !FullSuit
+        rep #$20
+        and.w #$00FF
+        clc
+        adc.w #!FULL_SUIT_AT
+        pha
+        jsr FullDma
+        sep #$20
+        lda.b #$80+(!SAMUS_VISOR_PAL*16)
+        sta !CGADD
+        rep #$20
+        pla
+        clc
+        adc.w #!FULL_PAL_BYTES
+        jmp FullDma
 
 ; The set in `!FullWant`'s BG3 palettes into CGRAM $00-$1F, and `!FullSet`
-; says so. 16-bit A and index in and out.
+; says so; then the window's palettes, `!HUD_PAL` on. In the Queen's room
+; (sprite editor Step 2) those are her sixteen colours, OBJ palette 2's: BG2
+; draws her head from her object characters, and the status bar is BG3's
+; there (`!HudBg3`). 16-bit A and index in and out; keeps X.
 FullBg:
         sep #$20
         stz !CGADD
@@ -31981,7 +32048,33 @@ FullBg:
         asl a
         asl a                   ; `!FULL_SET_BYTES` a set
         ldy.w #!FULL_SET_BYTES
-        jmp FullDmaY
+        jsr FullDmaY
+        sep #$20
+        lda.b #!HUD_PAL<<4
+        sta !CGADD
+        rep #$20
+        phx
+        ldx.w #$0000
+-       lda.w !FullSet
+        and.w #$00FF
+        cmp.w #!AREA_QUEEN      ; her room's set is her area's
+        beq +
+        txa
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a                   ; `!FULL_PAL_BYTES` a palette
+        clc
+        adc.w #!FULL_WIN_AT
+        bra ++
++       lda.w #!FULL_OBJ_AT+(!OBJ_DAMAGE_PAL*!FULL_PAL_BYTES)
+++      jsr FullDma
+        inx
+        cpx.w #!WIN_PALS
+        bne -
+        plx
+        rts
 
 ; OBJ palette 2: slot 2's own colours at step 0, else the damage step's, and
 ; `!FullObj2` says which. 16-bit A and index in and out.
@@ -31998,16 +32091,19 @@ FullObj2Load:
         asl a
         asl a
         asl a
+        asl a
+        asl a                   ; `!FULL_PAL_BYTES` a step
         clc
         adc.w #!FULL_DMG_AT
         bra FullDma
-+       lda.w #!FULL_OBJ_AT+(!OBJ_DAMAGE_PAL*8)
++       lda.w #!FULL_OBJ_AT+(!OBJ_DAMAGE_PAL*!FULL_PAL_BYTES)
         ; fall through
-; One palette's 8 bytes at the table's +A into CGRAM at its address, by DMA on
-; channel 2, as `.four`'s. `FullDmaY` takes the byte count in Y. The table
-; never crosses a bank (`snes_inject.patchFull`). 16-bit A in and out; keeps X.
+; One palette's `!FULL_PAL_BYTES` at the table's +A into CGRAM at its
+; address, by DMA on channel 2, as `.four`'s. `FullDmaY` takes the byte count
+; in Y. The table never crosses a bank (`snes_inject.patchFull`). 16-bit A in
+; and out; keeps X.
 FullDma:
-        ldy.w #8
+        ldy.w #!FULL_PAL_BYTES
 FullDmaY:
         clc
         adc.l FullTablePtr
@@ -32037,8 +32133,8 @@ FullSurface:
         rtl
 
 ; Once a play frame, from `DrawEnemies`' end, and only in `full`: the colour
-; set the camera's cell wants (`areas.lookOf`: the Queen's room over a nest
-; over a lava table over the area) and the damage step OBJ palette 2 wants
+; set the camera's cell wants (`areas.lookOf`: the Queen's room over the
+; bubble table over a nest over a lava table over the area) and the damage step OBJ palette 2 wants
 ; (`!MetStep`, none in her room). What differs from CGRAM is NMI's: bits 1
 ; and 2 of `!SchemeDue`, which `SchemeNmi` loads. `FindBlob`'s
 ; direct page is kept: the frame's other code may hold a blob across this.
@@ -32092,9 +32188,22 @@ FullFrame:
         ply
         sty $0E
         sep #$30
-        ldx.b #$00              ; her room: OBJ palette 2 is hers
+        cmp.b #!AREA_NONE       ; a cell no room is in, which the camera can
+        bne +                   ;   show the edge of: the set stays
+        lda.w !FullWant
+        bra .step
++       ldx.b #$00              ; her room: OBJ palette 2 is hers
         cmp.b #!AREA_QUEEN
         beq .want
+        tay
+        lda !TileTable
+        and.b #$0F
+        cmp.b #!TABLE_BUBBLES   ; Step 9: the bubbles, wherever they load
+        bne +
+        lda.b #!SET_BUBBLES
+        bra .step
++       tax
+        tya
         bit.b #!NEST_BIT
         beq .lava
         and.b #$7F              ; a nest: the area's variant
@@ -32102,17 +32211,11 @@ FullFrame:
         adc.b #!AREA_COUNT
         bra .step
 .lava
-        pha
-        lda !TileTable          ; `warp.isLavaTable`: metatile tables 6-8
-        and.b #$0F
-        cmp.b #6
-        bcc +
-        cmp.b #9
-        bcs +
-        pla
+        cpx.b #6                ; `warp.isLavaTable`: metatile tables 6-8
+        bcc .step
+        cpx.b #9
+        bcs .step
         lda.b #!SET_ACID
-        bra .step
-+       pla
 .step
         ldx.w !MetStep
 .want
@@ -32128,6 +32231,36 @@ FullFrame:
         beq +
         lda.b #$04
         tsb.w !SchemeDue
++       jsr FullSuitOf          ; Step 9: the suit's OBJ palettes
+        cmp.w !FullSuit
+        beq +
+        lda.b #$08
+        tsb.w !SchemeDue
++       plp
+        rtl
+
+; The suit `FullSuitLoad` should load, 0 Power or 16 Varia, into
+; `!FullSuitWant` and A. 8-bit A in and out.
+FullSuitOf:
+        lda !Items
+        and.b #!ITEM_VARIA
+        beq +
+        lda.b #!FULL_SUIT_BYTES
++       sta.w !FullSuitWant
+        rts
+
+; `ENTER_QUEEN`'s, in `full` alone: her room's colour set, and OBJ palette 2
+; hers. `FullFrame` is the enemy handler's, which her room doesn't run, and
+; her room is one look, so once on entry is enough. Any widths; keeps them.
+FullQueen:
+        php
+        sep #$30
+        lda.w !Scheme
+        cmp.b #!SCHEME_FULL
+        bne +
+        lda.b #!AREA_QUEEN
+        ldx.b #$00
+        jmp FullFrame_want      ; its `plp`/`rtl` are this one's
 +       plp
         rtl
 
@@ -32824,7 +32957,9 @@ VariaAnimStart:
 ; The walk is the original's arithmetic on its Game Boy address; each byte is
 ; then put where it lands on the SNES. The suit's sheet is 4bpp, so a Game Boy
 ; tile's byte `b` is the same byte of a 32-byte tile, and on the SNES the byte
-; `b` of a tile is the low (even) or high (odd) half of its word `b/2`.
+; `b` of a tile is the low (even) or high (odd) half of its word `b/2`. The
+; byte sixteen on, planes 2 and 3, goes with it, eight words on (sprite editor
+; Step 2), so an edited tile changes as the Game Boy's does.
 ;
 ; The data bank is the sheet's for the loop. Every blob bank of this LoROM cart
 ; mirrors WRAM and the PPU below $8000, as bank 0 does.
@@ -32858,6 +32993,9 @@ VariaAnimNmi:
         clc
         adc.w !VariaVram
         sta.w !VMADDL
+        clc
+        adc.w #8                        ; planes 2 and 3, eight words on
+        pha
         lda.w !VariaTmp
         asl a                           ; 32 SNES bytes a tile
         sta.w !VariaTmp
@@ -32867,16 +33005,29 @@ VariaAnimNmi:
         clc
         adc.w !VariaSrc
         tax
-        sep #$20
-        lda.w $0000,x                   ; $2C14 `ld a,[de]`
-        pha
+        pla
+        sta.w !VariaTmp                 ; the planes 2 and 3 word
         tya
         lsr a                           ; the byte's parity: which half
-        pla
-        bcs +
+        sep #$20
+        lda.w $0000,x                   ; $2C14 `ld a,[de]`
+        bcs .high
         sta.w !VMDATAL                  ; $2C15 `ld [hl],a`
+        rep #$20
+        lda.w !VariaTmp
+        sta.w !VMADDL
+        sep #$20
+        lda.w $0010,x                   ; and its planes 2 and 3 (sprite
+        sta.w !VMDATAL                  ;   editor Step 2)
         bra ++
-+       sta.w !VMDATAH
+.high
+        sta.w !VMDATAH
+        rep #$20
+        lda.w !VariaTmp
+        sta.w !VMADDL
+        sep #$20
+        lda.w $0010,x
+        sta.w !VMDATAH
 ++      rep #$20
         lda.w !VariaHL
         clc
